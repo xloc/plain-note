@@ -1,0 +1,13 @@
+{
+  "name": "cloudflare-notes-pwa",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "scripts": {
+    "build": "pnpm --dir src/client build",
+    "dev:client": "pnpm --dir src/client dev",
+    "dev:worker": "pnpm --dir src/worker dev",
+    "deploy": "pnpm build && pnpm --dir src/worker deploy",
+    "smoke": "bash scripts/smoke-api.sh",
+    "typecheck": "pnpm --dir src/worker typecheck"
+  }
+}

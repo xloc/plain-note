@@ -1,0 +1,21 @@
+main {
+  display: grid;
+}
+
+header {
+  display: flex;
+}
+
+nav {
+  display: flex;
+  overflow: auto;
+}
+
+article,
+label {
+  display: grid;
+}
+
+textarea {
+  width: 100%;
+}
