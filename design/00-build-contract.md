@@ -1,4 +1,4 @@
-# Cloudflare Notes PWA — Build Contract
+# plain-note — Build Contract
 
 ## Goal
 

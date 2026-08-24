@@ -42,7 +42,7 @@ export async function setMeta(key: string, value: string | number) {
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const result = indexedDB.open('note-pwa', 1)
+    const result = indexedDB.open('plain-note', 1)
     result.onupgradeneeded = () => {
       result.result.createObjectStore('notes', { keyPath: 'id' })
       result.result.createObjectStore('meta', { keyPath: 'key' })

@@ -1,5 +1,5 @@
 {
-  "name": "@note-pwa/worker",
+  "name": "@plain-note/worker",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,4 +1,4 @@
-const CACHE = 'note-pwa-shell-v1'
+const CACHE = 'plain-note-shell-v1'
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/manifest.webmanifest'])))

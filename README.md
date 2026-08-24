@@ -1,6 +1,6 @@
-# Cloudflare Notes PWA
+# plain-note
 
-A small local-first Markdown notes application. IndexedDB is the browser's working store, R2 is authoritative, and D1 is a disposable synchronization index.
+A small local-first Markdown notes PWA on Cloudflare. IndexedDB is the browser's working store, R2 is authoritative, and D1 is a disposable synchronization index.
 
 ## Local development
 
@@ -31,7 +31,7 @@ The smoke test expects the local Worker to be running.
 
 ## Cloudflare deployment
 
-Create an R2 bucket and D1 database named `note-pwa`, then replace the placeholder D1 ID in `wrangler.jsonc` with the ID returned by Cloudflare. The R2 bucket name can also be changed there if needed.
+Create an R2 bucket and D1 database named `plain-note`, then replace the placeholder D1 ID in `wrangler.jsonc` with the ID returned by Cloudflare. The R2 bucket name can also be changed there if needed.
 
 Build and deploy with:
 

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "note-pwa",
+  "name": "plain-note",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-08-24",
   "assets": {
@@ -12,13 +12,13 @@
   "r2_buckets": [
     {
       "binding": "NOTES",
-      "bucket_name": "note-pwa"
+      "bucket_name": "plain-note"
     }
   ],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "note-pwa",
+      "database_name": "plain-note",
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ]
