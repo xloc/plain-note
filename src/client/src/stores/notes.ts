@@ -335,9 +335,14 @@ export function recordLabel(record: NoteRecord) {
 }
 
 export function noteTitle(content: string) {
-  return content.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1] || 'Untitled'
+  return noteHeading(content)?.[1].trim() || 'Untitled'
 }
 
 export function notePreview(content: string) {
-  return content.replace(/^#\s+(.+?)\s*#*\s*$/m, '').replace(/\n+/g, ' ').trim().slice(0, 80)
+  const heading = noteHeading(content)
+  return (heading ? content.slice(heading[0].length) : content).replace(/\n+/g, ' ').trim().slice(0, 80)
+}
+
+function noteHeading(content: string) {
+  return content.match(/^#\s+([^\n]*?)(?:\s+#+)?\s*(?=\n|$)/)
 }
