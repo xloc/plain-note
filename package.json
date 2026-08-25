@@ -4,6 +4,7 @@
   "packageManager": "pnpm@11.21.0",
   "scripts": {
     "build": "pnpm --dir src/client build",
+    "dev": "pnpm --parallel --stream --filter @plain-note/worker --filter @plain-note/client dev",
     "dev:client": "pnpm --dir src/client dev",
     "dev:worker": "pnpm --dir src/worker dev",
     "deploy": "pnpm build && pnpm --dir src/worker deploy",

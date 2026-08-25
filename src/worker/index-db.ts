@@ -1,7 +1,7 @@
 import type { Change, NoteRecord, SyncResponse } from '../shared/note'
 import { getRecord } from './storage'
 
-const SCHEMA_VERSION = '1'
+const SCHEMA_VERSION = '2'
 
 type Env = {
   DB: D1Database
@@ -33,14 +33,8 @@ export async function rebuildIndex(env: Env) {
       revision TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
       deleted INTEGER NOT NULL,
-      r2_etag TEXT NOT NULL
-    )`),
-    env.DB.prepare(`CREATE TABLE changes (
-      seq INTEGER PRIMARY KEY AUTOINCREMENT,
-      note_id TEXT NOT NULL,
-      revision TEXT NOT NULL,
-      updated_at INTEGER NOT NULL,
-      operation TEXT NOT NULL
+      r2_etag TEXT NOT NULL,
+      last_seq INTEGER NOT NULL
     )`),
   ])
 
@@ -71,19 +65,23 @@ export async function rebuildIndex(env: Env) {
 
 export async function recordChange(env: Env, record: NoteRecord, etag: string) {
   await ensureIndex(env)
-  const existing = await env.DB.prepare(
-    'SELECT revision FROM note_index WHERE id = ?',
-  ).bind(record.id).first<{ revision: string }>()
-  if (existing?.revision === record.revision)
-    return
-
-  await env.DB.batch([
-    indexStatement(env.DB, record.id, record, etag),
-    env.DB.prepare(`
-      INSERT INTO changes (note_id, revision, updated_at, operation)
-      VALUES (?, ?, ?, ?)
-    `).bind(record.id, record.revision, record.updatedAt, 'deleted' in record ? 'delete' : 'put'),
-  ])
+  await env.DB.prepare(`
+    INSERT INTO note_index (id, revision, updated_at, deleted, r2_etag, last_seq)
+    VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(last_seq), 0) + 1 FROM note_index))
+    ON CONFLICT(id) DO UPDATE SET
+      revision = excluded.revision,
+      updated_at = excluded.updated_at,
+      deleted = excluded.deleted,
+      r2_etag = excluded.r2_etag,
+      last_seq = excluded.last_seq
+    WHERE note_index.revision != excluded.revision
+  `).bind(
+    record.id,
+    record.revision,
+    record.updatedAt,
+    'deleted' in record ? 1 : 0,
+    etag,
+  ).run()
 }
 
 export async function getChanges(
@@ -104,10 +102,11 @@ export async function getChanges(
   }
 
   const result = await env.DB.prepare(`
-    SELECT seq, note_id AS id, revision, updated_at AS updatedAt, operation
-    FROM changes
-    WHERE seq > ?
-    ORDER BY seq
+    SELECT last_seq AS seq, id, revision, updated_at AS updatedAt,
+      CASE deleted WHEN 1 THEN 'delete' ELSE 'put' END AS operation
+    FROM note_index
+    WHERE last_seq > ?
+    ORDER BY last_seq
     LIMIT 500
   `).bind(after).all<Change>()
   const cursor = result.results.at(-1)?.seq ?? after
@@ -116,12 +115,13 @@ export async function getChanges(
 
 function indexStatement(db: D1Database, id: string, record: NoteRecord, etag: string) {
   return db.prepare(`
-    INSERT INTO note_index (id, revision, updated_at, deleted, r2_etag)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO note_index (id, revision, updated_at, deleted, r2_etag, last_seq)
+    VALUES (?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
       revision = excluded.revision,
       updated_at = excluded.updated_at,
       deleted = excluded.deleted,
-      r2_etag = excluded.r2_etag
+      r2_etag = excluded.r2_etag,
+      last_seq = excluded.last_seq
   `).bind(id, record.revision, record.updatedAt, 'deleted' in record ? 1 : 0, etag)
 }

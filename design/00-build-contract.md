@@ -20,7 +20,7 @@ Build a small, reliable, local-first Progressive Web App for one user (or a few 
 ```text
 Browser PWA                         Cloudflare
 Editor → IndexedDB → Worker API → R2 (authoritative notes and resources)
-                         └────────→ D1 (derived indexes and sync journal)
+                         └────────→ D1 (derived indexes and sync sequences)
 ```
 
 - **Vue 3** provides the frontend application. **Workers + Static Assets** serve the built PWA and provide the API.
@@ -30,7 +30,7 @@ Editor → IndexedDB → Worker API → R2 (authoritative notes and resources)
 - **Synchronization** uses a D1 sequence journal (for example, `GET /api/sync?after=<sequence>`) to discover incremental puts and deletes. Clients then fetch changed authoritative objects from R2.
 - **Optimistic concurrency** uses a note revision and a client-provided base revision. A revision mismatch produces a conflict rather than an implicit last-write-wins update.
 - **Deletion** replaces the note's stable R2 object with a JSON tombstone using a conditional write. Active objects contain Markdown; deleted objects contain JSON, distinguished by object metadata. A portable export presents them as `note.md` and `deleted.json` respectively. Tombstones may only be cleaned up after an explicit retention/synchronization policy is defined.
-- **Write order favors recovery:** write R2 first, then update D1's index and journal. If D1 is stale or unavailable after an R2 write, reconcile or rebuild it by scanning R2.
+- **Write order favors recovery:** write R2 first, then update D1's index. If D1 is stale or unavailable after an R2 write, reconcile or rebuild it by scanning R2.
 - **Search** initially runs from local IndexedDB and/or a derived D1 index. No dedicated search product is required.
 - **Portability** is a first-class requirement: `GET /api/export` should produce an archive of notes, resources, tombstones as needed, and simple export metadata.
 
