@@ -43,7 +43,6 @@ export const useNotesStore = defineStore('notes', () => {
     const now = Date.now()
     const note: LocalNote = {
       id: crypto.randomUUID(),
-      title: 'Untitled',
       content: '',
       tags: [],
       resources: [],
@@ -60,7 +59,7 @@ export const useNotesStore = defineStore('notes', () => {
     scheduleSync()
   }
 
-  function updateSelected(update: { title?: string, content?: string }) {
+  function updateSelected(update: { content: string }) {
     const note = selectedNote.value
     if (!note)
       return
@@ -332,5 +331,13 @@ function fromRemote(note: Note): LocalNote {
 }
 
 export function recordLabel(record: NoteRecord) {
-  return 'deleted' in record ? 'deleted note' : `“${record.title}”`
+  return 'deleted' in record ? 'deleted note' : `“${noteTitle(record.content)}”`
+}
+
+export function noteTitle(content: string) {
+  return content.match(/^#\s+(.+?)\s*#*\s*$/m)?.[1] || 'Untitled'
+}
+
+export function notePreview(content: string) {
+  return content.replace(/^#\s+(.+?)\s*#*\s*$/m, '').replace(/\n+/g, ' ').trim().slice(0, 80)
 }

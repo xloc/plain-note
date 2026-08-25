@@ -2,7 +2,6 @@ import type { NoteRecord, NoteResource } from '../../shared/note'
 
 export type LocalNote = {
   id: string
-  title: string
   content: string
   tags: string[]
   resources: NoteResource[]

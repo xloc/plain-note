@@ -15,6 +15,7 @@ Follow established best practices when they make the code or project simpler. Ig
 - **Use recursion only when it simplifies code.**
 - **Don't add structure for structure's sake.** Avoid unnecessary abstractions, boilerplate, and configuration layers. Components and modules are fine when they serve the UI.
 - **No premature "robustness".** Skip heavy validation, performance optimizations, and edge-case handling unless asked. Let runtime errors throw naturally.
+- **No backward compatibility by default.** Prefer deleting and rebuilding derived or local state over migrations or upgrade paths. Ask the user before adding compatibility work when it appears necessary.
 - **Keep control flow obvious.** Minimal state, minimal branching, minimal helpers. Don't refactor for elegance if it adds indirection.
 - **Fewer concepts over "best practices".** Output should be short and simple; prioritize fewer moving parts over convention.
 - **If unsure between two implementations**, pick the one with fewer moving parts and less duplication, even if it's less general.

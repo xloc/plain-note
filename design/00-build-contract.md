@@ -6,7 +6,7 @@ Build a small, reliable, local-first Progressive Web App for one user (or a few 
 
 ## Functional requirements
 
-- A user can create, read, update, and delete notes, including title, content, tags, timestamps, and revision.
+- A user can create, read, update, and delete notes, including content, tags, timestamps, and revision.
 - A note can have separate binary resources such as images, PDFs, and audio files.
 - Edits appear immediately and remain usable offline. The browser saves locally first and synchronizes changes in the background when connected.
 - Multiple devices can synchronize incrementally. Concurrent changes to the same note must be detected and reported as conflicts; newer remote content must never be silently overwritten.
