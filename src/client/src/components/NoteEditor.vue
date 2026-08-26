@@ -2,19 +2,29 @@
 import { baseKeymap, chainCommands, setBlockType, toggleMark } from 'prosemirror-commands'
 import { gapCursor } from 'prosemirror-gapcursor'
 import { history, redo, undo } from 'prosemirror-history'
-import { inputRules, textblockTypeInputRule, wrappingInputRule } from 'prosemirror-inputrules'
+import { InputRule, inputRules, textblockTypeInputRule, wrappingInputRule } from 'prosemirror-inputrules'
 import { keymap } from 'prosemirror-keymap'
 import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list'
-import { type Command, EditorState, TextSelection } from 'prosemirror-state'
+import { type Command, EditorState, NodeSelection, TextSelection } from 'prosemirror-state'
 import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tableEditing } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { markdownParser, markdownSerializer, schema } from '../editor/markdown'
+import { markdownParser, markdownSerializer, schema, tabCharacter } from '../editor/markdown'
 import { TableView } from '../editor/TableView'
 
 const props = defineProps<{ modelValue: string }>()
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
-const { bullet_list: bulletList, hard_break: hardBreak, list_item: listItem, ordered_list: orderedList, paragraph } = schema.nodes
+const {
+  bullet_list: bulletList,
+  code_block: codeBlock,
+  hard_break: hardBreak,
+  horizontal_rule: horizontalRule,
+  list_item: listItem,
+  ordered_list: orderedList,
+  paragraph,
+} = schema.nodes
+const { code } = schema.marks
+const codeIndentation = ' '.repeat(4)
 
 const editor = ref<HTMLElement | null>(null)
 let view: EditorView | undefined
@@ -75,11 +85,77 @@ const deleteSelectedTablePart: Command = (state, dispatch) => {
   return false
 }
 
+const insertTab: Command = (state, dispatch) => {
+  if (dispatch)
+    dispatch(state.tr.insertText(tabCharacter).scrollIntoView())
+  return true
+}
+
+const removeTab: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection
+  if (empty && $from.nodeBefore?.isText && $from.nodeBefore.text?.endsWith(tabCharacter) && dispatch)
+    dispatch(state.tr.delete($from.pos - tabCharacter.length, $from.pos).scrollIntoView())
+  return true
+}
+
+const insertCodeIndentation: Command = (state, dispatch) => {
+  const { $from, $to } = state.selection
+  if (!$from.sameParent($to) || $from.parent.type !== codeBlock)
+    return false
+  if (dispatch)
+    dispatch(state.tr.insertText(codeIndentation).scrollIntoView())
+  return true
+}
+
+const removeCodeIndentation: Command = (state, dispatch) => {
+  const { $from, $to, empty } = state.selection
+  if (!$from.sameParent($to) || $from.parent.type !== codeBlock)
+    return false
+  if (!empty)
+    return true
+
+  const textBefore = $from.parent.textBetween(0, $from.parentOffset)
+  const lineStart = textBefore.lastIndexOf('\n') + 1
+  const indentation = textBefore.slice(lineStart).match(/^ */)?.[0].length ?? 0
+  const length = Math.min(codeIndentation.length, indentation)
+  if (length && dispatch) {
+    const start = $from.start() + lineStart
+    dispatch(state.tr.delete(start, start + length).scrollIntoView())
+  }
+  return true
+}
+
+const codeBlockEnter: Command = (state, dispatch) => {
+  const { $from, $to } = state.selection
+  if (!$from.sameParent($to) || $from.parent.type !== codeBlock)
+    return false
+
+  const textBefore = $from.parent.textBetween(0, $from.parentOffset)
+  const line = textBefore.slice(textBefore.lastIndexOf('\n') + 1)
+  const indentation = line.match(/^[ \t]*/)?.[0] ?? ''
+  if (dispatch)
+    dispatch(state.tr.insertText(`\n${indentation}`).scrollIntoView())
+  return true
+}
+
 function plugins() {
   return [
     history(),
     inputRules({
       rules: [
+        new InputRule(/`([^`\n]+)`$/, (state, match, start, end) => {
+          const inlineCode = schema.text(match[1], [code.create()])
+          const transaction = state.tr.replaceWith(start, end, inlineCode)
+          return transaction
+            .setSelection(TextSelection.create(transaction.doc, start + inlineCode.nodeSize))
+            .removeStoredMark(code)
+            .scrollIntoView()
+        }),
+        textblockTypeInputRule(/^```$/, codeBlock),
+        new InputRule(/^(?:---|___|\*\*\*)$/, (state, _match, start, end) => {
+          const transaction = state.tr.replaceWith(start - 1, end, horizontalRule.create())
+          return transaction.setSelection(NodeSelection.create(transaction.doc, start - 1))
+        }),
         textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, match => ({ level: match[1].length })),
         wrappingInputRule(/^\s*([-+*])\s$/, bulletList),
         wrappingInputRule(/^(\d+)\.\s$/, orderedList, match => ({ order: Number(match[1]) }),
@@ -92,11 +168,12 @@ function plugins() {
       'Mod-Shift-z': redo,
       'Mod-b': toggleMark(schema.marks.strong),
       'Mod-i': toggleMark(schema.marks.em),
+      'Mod-`': toggleMark(code),
       Backspace: deleteSelectedTablePart,
       Delete: deleteSelectedTablePart,
-      Enter: chainCommands(splitListItem(listItem), paragraphEnter),
-      Tab: chainCommands(goToNextCell(1), sinkListItem(listItem)),
-      'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(listItem)),
+      Enter: chainCommands(splitListItem(listItem), codeBlockEnter, paragraphEnter),
+      Tab: chainCommands(goToNextCell(1), sinkListItem(listItem), insertCodeIndentation, insertTab),
+      'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(listItem), removeCodeIndentation, removeTab),
       'Mod-Alt-t': insertTable,
       'Mod-Alt-0': setBlockType(paragraph),
       'Mod-Alt-1': setBlockType(schema.nodes.heading, { level: 1 }),
@@ -151,6 +228,11 @@ onBeforeUnmount(() => view?.destroy())
 </template>
 
 <style scoped>
+:deep(.ProseMirror) {
+  tab-size: 4;
+  white-space: break-spaces;
+}
+
 :deep(.ProseMirror-hideselection) {
   caret-color: transparent;
 }
@@ -177,7 +259,8 @@ onBeforeUnmount(() => view?.destroy())
 
 :deep(.ProseMirror p),
 :deep(.ProseMirror ul),
-:deep(.ProseMirror ol) {
+:deep(.ProseMirror ol),
+:deep(.ProseMirror pre) {
   --pm-paragraph-gap: calc(2 * var(--spacing));
   margin: 0 0 var(--pm-paragraph-gap);
 }
@@ -188,6 +271,11 @@ onBeforeUnmount(() => view?.destroy())
 
 :deep(.ProseMirror li p) {
   margin: 0;
+}
+
+:deep(.ProseMirror li ul),
+:deep(.ProseMirror li ol) {
+  margin-block: 0;
 }
 
 :deep(.ProseMirror h1),
@@ -426,12 +514,22 @@ onBeforeUnmount(() => view?.destroy())
 }
 
 :deep(.ProseMirror code) {
+  background-color: var(--color-stone-200);
+  border-radius: var(--spacing);
   font-family: monospace;
+  padding: calc(0.5 * var(--spacing)) var(--spacing);
+}
+
+:deep(.ProseMirror pre code) {
+  border-radius: 0;
+  padding: 0;
 }
 
 :deep(.ProseMirror pre) {
-  margin: 0 0 1rem;
+  background-color: var(--color-stone-200);
+  border-radius: var(--radius-lg);
+  line-height: 1.2;
   overflow: auto;
-  padding: 1rem;
+  padding: calc(3 * var(--spacing)) calc(4 * var(--spacing));
 }
 </style>

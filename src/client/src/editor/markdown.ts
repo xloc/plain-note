@@ -2,6 +2,8 @@ import { MarkdownParser, MarkdownSerializer, defaultMarkdownParser, defaultMarkd
 import { Schema } from 'prosemirror-model'
 import { tableNodes } from 'prosemirror-tables'
 
+export const tabCharacter = '\t'
+
 export const schema = new Schema({
   nodes: defaultMarkdownParser.schema.spec.nodes.append(tableNodes({
     cellAttributes: {},
@@ -43,5 +45,13 @@ export const markdownSerializer = new MarkdownSerializer({
       }
     })
     state.closeBlock(node)
+  },
+  text(state, node, parent, index) {
+    node.text!.split(tabCharacter).forEach((text, segmentIndex) => {
+      if (segmentIndex)
+        state.write('&#9;')
+      if (text)
+        defaultMarkdownSerializer.nodes.text(state, schema.text(text, node.marks), parent, index)
+    })
   },
 }, defaultMarkdownSerializer.marks, { escapeExtraCharacters: /[|]/g })
