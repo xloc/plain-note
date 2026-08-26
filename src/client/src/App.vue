@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
 import NoteEditor from './components/NoteEditor.vue'
-import { notePreview, noteTitle, recordLabel, useNotesStore } from './stores/notes'
+import { notePreview, noteTitle, useNotesStore } from './stores/notes'
 
 const notes = useNotesStore()
 const sync = () => void notes.sync()
@@ -65,17 +65,6 @@ onUnmounted(() => window.removeEventListener('online', sync))
       <article class="flex min-w-0 flex-1 flex-col" v-if="notes.selectedNote">
         <NoteEditor class="min-h-0 flex-1 overflow-auto" :model-value="notes.selectedNote.content"
           @update:model-value="notes.updateSelected({ content: $event })" />
-
-
-        <div v-if="notes.selectedNote.conflict">
-          This note conflicts with {{ recordLabel(notes.selectedNote.conflict) }} on the server.
-          <button type="button" @click="notes.acceptServer(notes.selectedNote.id)">
-            Use server version
-          </button>
-          <button type="button" @click="notes.keepLocal(notes.selectedNote.id)">
-            Keep this version
-          </button>
-        </div>
       </article>
     </template>
   </main>

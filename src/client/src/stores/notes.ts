@@ -11,6 +11,7 @@ import {
   setMeta,
   type LocalNote,
 } from '../db'
+import { mergeMarkdown } from '../editor/merge'
 
 export const useNotesStore = defineStore('notes', () => {
   const notes = ref<LocalNote[]>([])
@@ -25,19 +26,20 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   const activeNotes = computed(() => notes.value
-    .filter(note => !note.deleted || note.syncState === 'conflict')
+    .filter(note => !note.deleted)
     .sort((a, b) => b.updatedAt - a.updatedAt))
-  const selectedNote = computed(() => notes.value.find(note => (
-    note.id === selectedId.value && (!note.deleted || note.syncState === 'conflict')
-  )))
+  const selectedNote = computed(() => notes.value.find(note => note.id === selectedId.value && !note.deleted))
 
   async function initialize() {
     notes.value = await loadNotes()
     selectedId.value = activeNotes.value[0]?.id ?? null
+    ready.value = true
+    if (!selectedId.value && navigator.onLine)
+      await sync()
     if (!selectedId.value)
       await createNote()
-    ready.value = true
-    void sync()
+    else if (syncMessage.value === 'Local only')
+      void sync()
   }
 
   async function createNote() {
@@ -50,7 +52,7 @@ export const useNotesStore = defineStore('notes', () => {
       createdAt: now,
       updatedAt: now,
       revision: crypto.randomUUID(),
-      baseRevision: null,
+      base: null,
       deleted: false,
       syncState: 'pending',
     }
@@ -68,7 +70,6 @@ export const useNotesStore = defineStore('notes', () => {
       revision: crypto.randomUUID(),
       updatedAt: Date.now(),
       syncState: 'pending',
-      conflict: undefined,
     })
     void saveNote(note)
     scheduleSync()
@@ -78,7 +79,7 @@ export const useNotesStore = defineStore('notes', () => {
     const note = selectedNote.value
     if (!note)
       return
-    if (note.baseRevision === null) {
+    if (note.base === null) {
       notes.value = notes.value.filter(candidate => candidate.id !== note.id)
       await removeNote(note.id)
     }
@@ -88,7 +89,6 @@ export const useNotesStore = defineStore('notes', () => {
         revision: crypto.randomUUID(),
         updatedAt: Date.now(),
         syncState: 'pending',
-        conflict: undefined,
       })
       await saveNote(note)
     }
@@ -132,7 +132,13 @@ export const useNotesStore = defineStore('notes', () => {
     try {
       await pushPending()
       await pullChanges()
-      syncMessage.value = 'Synced'
+      if (notes.value.some(note => note.syncState === 'pending')) {
+        syncMessage.value = 'Pending'
+        scheduleSync()
+      }
+      else {
+        syncMessage.value = 'Synced'
+      }
     }
     catch (error) {
       syncMessage.value = error instanceof Error ? error.message : 'Sync failed'
@@ -143,43 +149,57 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function pushPending() {
-    for (const candidate of [...notes.value]) {
-      if (candidate.syncState !== 'pending')
-        continue
-      const revision = candidate.revision
-      try {
-        if (candidate.deleted) {
-          if (!candidate.baseRevision)
-            continue
-          await deleteNote(candidate.id, {
-            baseRevision: candidate.baseRevision,
-            revision,
-            updatedAt: candidate.updatedAt,
-          })
-          const current = notes.value.find(note => note.id === candidate.id)
-          if (current?.revision === revision) {
-            notes.value = notes.value.filter(note => note.id !== candidate.id)
-            await removeNote(candidate.id)
+    for (const id of notes.value.filter(note => note.syncState === 'pending').map(note => note.id)) {
+      let conflicts = 0
+      while (conflicts < 2) {
+        const candidate = notes.value.find(note => note.id === id)
+        if (!candidate || candidate.syncState !== 'pending')
+          break
+
+        const revision = candidate.revision
+        try {
+          if (candidate.deleted) {
+            if (!candidate.base)
+              throw new Error('A server-backed note is missing its base snapshot')
+            const { tombstone } = await deleteNote(candidate.id, {
+              baseRevision: candidate.base.revision,
+              revision,
+              updatedAt: candidate.updatedAt,
+            })
+            const current = notes.value.find(note => note.id === candidate.id)
+            if (current?.revision === revision) {
+              notes.value = notes.value.filter(note => note.id !== candidate.id)
+              await removeNote(candidate.id)
+            }
+            else if (current) {
+              current.base = copyRecord(tombstone)
+              await saveNote(current)
+            }
           }
-        }
-        else {
-          await putNote({ baseRevision: candidate.baseRevision, note: toNote(candidate) })
-          const current = notes.value.find(note => note.id === candidate.id)
-          if (current?.revision === revision) {
-            current.baseRevision = revision
-            current.syncState = 'synced'
-            await saveNote(current)
+          else {
+            const sent = toNote(candidate)
+            const { note: stored } = await putNote({
+              baseRevision: candidate.base?.revision ?? null,
+              note: sent,
+            })
+            const current = notes.value.find(note => note.id === candidate.id)
+            if (current) {
+              current.base = copyNote(stored)
+              if (current.revision === revision)
+                current.syncState = 'synced'
+              await saveNote(current)
+            }
           }
+          break
         }
-      }
-      catch (error) {
-        if (!(error instanceof ApiConflict))
-          throw error
-        const current = notes.value.find(note => note.id === candidate.id)
-        if (current?.revision === revision) {
-          current.syncState = 'conflict'
-          current.conflict = error.current
-          await saveNote(current)
+        catch (error) {
+          if (!(error instanceof ApiConflict))
+            throw error
+          const current = notes.value.find(note => note.id === candidate.id)
+          if (!current)
+            break
+          await mergeConflict(current, error.current)
+          conflicts++
         }
       }
     }
@@ -223,50 +243,40 @@ export const useNotesStore = defineStore('notes', () => {
   async function applyChange(change: Change) {
     const local = notes.value.find(note => note.id === change.id)
     if (change.operation === 'delete') {
+      if (!local)
+        return
+
       const tombstone: Tombstone = {
         id: change.id,
         deleted: true,
         revision: change.revision,
         updatedAt: change.updatedAt,
       }
-      if (local?.syncState === 'pending' && local.baseRevision !== change.revision) {
-        local.syncState = 'conflict'
-        local.conflict = tombstone
-        await saveNote(local)
-      }
-      else if (local?.syncState === 'conflict') {
-        local.conflict = tombstone
-        await saveNote(local)
-      }
-      else if (local) {
+      if (local.revision === change.revision || local.syncState === 'synced' || local.deleted) {
         notes.value = notes.value.filter(note => note.id !== change.id)
         await removeNote(change.id)
+      }
+      else if (local.base?.revision !== change.revision) {
+        await mergeConflict(local, tombstone)
       }
       return
     }
 
-    if (local?.syncState === 'conflict') {
-      if (local.conflict?.revision !== change.revision) {
-        local.conflict = (await getNote(change.id)).note
-        await saveNote(local)
-      }
-      return
-    }
-    if (local?.syncState === 'pending') {
-      if (local.revision === change.revision) {
-        local.baseRevision = change.revision
+    if (local?.revision === change.revision) {
+      if (local.syncState === 'pending') {
+        local.base = toNote(local)
         local.syncState = 'synced'
         await saveNote(local)
       }
-      else if (local.baseRevision !== change.revision) {
-        local.syncState = 'conflict'
-        local.conflict = (await getNote(change.id)).note
-        await saveNote(local)
-      }
       return
     }
-    if (local?.revision === change.revision)
+
+    if (local?.syncState === 'pending') {
+      if (local.base?.revision === change.revision)
+        return
+      await mergeConflict(local, (await getNote(change.id)).note)
       return
+    }
 
     const remote = (await getNote(change.id)).note
     const replacement = fromRemote(remote)
@@ -275,34 +285,39 @@ export const useNotesStore = defineStore('notes', () => {
     await saveNote(replacement)
   }
 
-  async function acceptServer(id: string) {
-    const local = notes.value.find(note => note.id === id)
-    if (!local?.conflict)
+  async function mergeConflict(local: LocalNote, remote: NoteRecord) {
+    if (!local.base)
+      throw new Error('A server-backed note is missing its base snapshot')
+
+    if ('deleted' in remote) {
+      if (local.deleted) {
+        notes.value = notes.value.filter(note => note.id !== local.id)
+        await removeNote(local.id)
+        return
+      }
+
+      local.base = copyRecord(remote)
+      local.revision = crypto.randomUUID()
+      local.updatedAt = Date.now()
+      local.syncState = 'pending'
+      await saveNote(local)
       return
-    if ('deleted' in local.conflict) {
-      notes.value = notes.value.filter(note => note.id !== id)
-      await removeNote(id)
-      selectedId.value = activeNotes.value[0]?.id ?? null
     }
-    else {
-      const replacement = fromRemote(local.conflict)
-      notes.value = notes.value.filter(note => note.id !== id)
+
+    if (local.deleted) {
+      const replacement = fromRemote(remote)
+      notes.value = notes.value.filter(note => note.id !== local.id)
       notes.value.push(replacement)
       await saveNote(replacement)
-    }
-  }
-
-  async function keepLocal(id: string) {
-    const local = notes.value.find(note => note.id === id)
-    if (!local?.conflict)
       return
-    local.baseRevision = local.conflict.revision
+    }
+
+    local.content = mergeMarkdown('deleted' in local.base ? '' : local.base.content, remote.content, local.content)
+    local.base = copyNote(remote)
     local.revision = crypto.randomUUID()
     local.updatedAt = Date.now()
     local.syncState = 'pending'
-    local.conflict = undefined
     await saveNote(local)
-    scheduleSync()
   }
 
   return {
@@ -324,33 +339,41 @@ export const useNotesStore = defineStore('notes', () => {
     pushPending,
     pullChanges,
     applyChange,
-    acceptServer,
-    keepLocal,
   }
 })
 
 function toNote(note: LocalNote): Note {
-  const {
-    baseRevision: _baseRevision,
-    deleted: _deleted,
-    syncState: _syncState,
-    conflict: _conflict,
-    ...stored
-  } = note
-  return stored
+  return {
+    id: note.id,
+    content: note.content,
+    tags: [...note.tags],
+    resources: note.resources.map(resource => ({ ...resource })),
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+    revision: note.revision,
+  }
 }
 
 function fromRemote(note: Note): LocalNote {
+  const current = copyNote(note)
   return {
-    ...note,
-    baseRevision: note.revision,
+    ...current,
+    base: copyNote(note),
     deleted: false,
     syncState: 'synced',
   }
 }
 
-export function recordLabel(record: NoteRecord) {
-  return 'deleted' in record ? 'deleted note' : `“${noteTitle(record.content)}”`
+function copyNote(note: Note): Note {
+  return {
+    ...note,
+    tags: [...note.tags],
+    resources: note.resources.map(resource => ({ ...resource })),
+  }
+}
+
+function copyRecord(record: NoteRecord): NoteRecord {
+  return 'deleted' in record ? { ...record } : copyNote(record)
 }
 
 export function noteTitle(content: string) {

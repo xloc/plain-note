@@ -8,10 +8,9 @@ export type LocalNote = {
   createdAt: number
   updatedAt: number
   revision: string
-  baseRevision: string | null
+  base: NoteRecord | null
   deleted: boolean
-  syncState: 'pending' | 'synced' | 'conflict'
-  conflict?: NoteRecord
+  syncState: 'pending' | 'synced'
 }
 
 const database = openDatabase()
@@ -48,8 +47,12 @@ export async function setMeta(key: string, value: string | number) {
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const result = indexedDB.open('plain-note', 1)
+    const result = indexedDB.open('plain-note', 2)
     result.onupgradeneeded = () => {
+      if (result.result.objectStoreNames.contains('notes'))
+        result.result.deleteObjectStore('notes')
+      if (result.result.objectStoreNames.contains('meta'))
+        result.result.deleteObjectStore('meta')
       result.result.createObjectStore('notes', { keyPath: 'id' })
       result.result.createObjectStore('meta', { keyPath: 'key' })
     }

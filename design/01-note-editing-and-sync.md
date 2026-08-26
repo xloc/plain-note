@@ -10,7 +10,8 @@ Deliver the smallest usable path from an offline Vue editor through IndexedDB sy
 - Edits are saved to IndexedDB immediately and do not wait for the network.
 - The app synchronizes pending changes in the background and on request.
 - Changes and deletions made by another device appear through incremental synchronization.
-- A concurrent edit is shown as a conflict. The user can keep the local version or accept the server version.
+- Concurrent edits are merged from the stored base, server Markdown, and device Markdown.
+- Overlapping Markdown blocks are kept server-first and device-second between three horizontal dividers.
 - The installed application shell remains available offline.
 
 ## API contract
@@ -34,6 +35,7 @@ The sync response contains the current D1 generation, a cursor, and changed note
 - A deleted object is a JSON tombstone with `application/json` metadata at the same key. Reusing the key allows R2 ETag conditions to serialize edits, deletes, and restores.
 - D1 contains only the note index, change journal, and schema/generation metadata.
 - A D1 schema-version mismatch drops and rebuilds derived tables by scanning R2. There are no migration scripts.
+- IndexedDB keeps the complete synchronized base record for every server-backed local note.
 
 ## Definition of done
 
@@ -47,4 +49,4 @@ The sync response contains the current D1 generation, a cursor, and changed note
 
 - Attachments and export archives.
 - Cloudflare Access setup and validation inside the Worker.
-- Automatic conflict merging, rich Markdown editing, search, and visual styling.
+- Search.
