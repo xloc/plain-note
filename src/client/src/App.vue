@@ -5,6 +5,10 @@ import { notePreview, noteTitle, recordLabel, useNotesStore } from './stores/not
 
 const notes = useNotesStore()
 const sync = () => void notes.sync()
+const resetLocalData = () => {
+  if (window.confirm('Delete all local notes and reload them from the server? Unsynced changes will be lost.'))
+    void notes.resetLocalData()
+}
 
 onMounted(() => {
   void notes.initialize()
@@ -27,6 +31,10 @@ onUnmounted(() => window.removeEventListener('online', sync))
         <button class="rounded-lg bg-violet-500 px-2 py-1 text-white" type="button" :disabled="notes.syncing"
           @click="notes.sync">
           {{ notes.syncMessage }}
+        </button>
+        <button class="rounded-lg bg-violet-500 px-2 py-1 text-white" type="button" :disabled="notes.syncing"
+          @click="resetLocalData">
+          Reset local data
         </button>
 
       </header>

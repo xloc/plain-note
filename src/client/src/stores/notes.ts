@@ -3,6 +3,7 @@ import { computed, ref, toRaw } from 'vue'
 import type { Change, Note, NoteRecord, Tombstone } from '../../../shared/note'
 import { ApiConflict, deleteNote, getChanges, getNote, putNote } from '../api'
 import {
+  clearLocalData,
   getMeta,
   loadNotes,
   removeNote,
@@ -104,6 +105,23 @@ export const useNotesStore = defineStore('notes', () => {
   function scheduleSync() {
     window.clearTimeout(syncTimer)
     syncTimer = window.setTimeout(() => void sync(), 700)
+  }
+
+  async function resetLocalData() {
+    if (syncing.value)
+      return
+    if (!navigator.onLine) {
+      syncMessage.value = 'Go online to reset local data'
+      return
+    }
+
+    window.clearTimeout(syncTimer)
+    await clearLocalData()
+    notes.value = []
+    selectedId.value = null
+    await sync()
+    if (!selectedId.value && syncMessage.value === 'Synced')
+      await createNote()
   }
 
   async function sync() {
@@ -301,6 +319,7 @@ export const useNotesStore = defineStore('notes', () => {
     deleteSelected,
     select,
     scheduleSync,
+    resetLocalData,
     sync,
     pushPending,
     pullChanges,

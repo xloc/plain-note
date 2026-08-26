@@ -28,6 +28,13 @@ export async function removeNote(id: string) {
   await request((await database).transaction('notes', 'readwrite').objectStore('notes').delete(id))
 }
 
+export async function clearLocalData() {
+  const transaction = (await database).transaction(['notes', 'meta'], 'readwrite')
+  transaction.objectStore('notes').clear()
+  transaction.objectStore('meta').clear()
+  await complete(transaction)
+}
+
 export async function getMeta(key: string) {
   const row = await request<{ key: string, value: string | number } | undefined>(
     (await database).transaction('meta').objectStore('meta').get(key),
@@ -55,5 +62,13 @@ function request<T = IDBValidKey>(result: IDBRequest<T>) {
   return new Promise<T>((resolve, reject) => {
     result.onsuccess = () => resolve(result.result)
     result.onerror = () => reject(result.error)
+  })
+}
+
+function complete(transaction: IDBTransaction) {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error)
   })
 }
