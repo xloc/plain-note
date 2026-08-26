@@ -1,4 +1,4 @@
-const CACHE = 'plain-note-shell-v1'
+const CACHE = 'plain-note-shell-v2'
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['/', '/manifest.webmanifest'])))
@@ -18,10 +18,12 @@ self.addEventListener('fetch', event => {
     return
 
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
-      if (response.ok)
-        caches.open(CACHE).then(cache => cache.put(event.request, response.clone()))
+    fetch(event.request).then(response => {
+      if (response.ok) {
+        const copy = response.clone()
+        event.waitUntil(caches.open(CACHE).then(cache => cache.put(event.request, copy)))
+      }
       return response
-    })),
+    }).catch(() => caches.match(event.request)),
   )
 })

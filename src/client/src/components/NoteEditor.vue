@@ -1,33 +1,70 @@
 <script setup lang="ts">
-import { baseKeymap, toggleMark } from 'prosemirror-commands'
+import { baseKeymap, chainCommands, setBlockType, toggleMark } from 'prosemirror-commands'
 import { history, redo, undo } from 'prosemirror-history'
-import { inputRules, textblockTypeInputRule } from 'prosemirror-inputrules'
+import { inputRules, textblockTypeInputRule, wrappingInputRule } from 'prosemirror-inputrules'
 import { keymap } from 'prosemirror-keymap'
 import { defaultMarkdownParser, defaultMarkdownSerializer } from 'prosemirror-markdown'
-import { EditorState } from 'prosemirror-state'
+import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list'
+import { type Command, EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{ modelValue: string }>()
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
+const { schema } = defaultMarkdownParser
+const { bullet_list: bulletList, hard_break: hardBreak, list_item: listItem, ordered_list: orderedList, paragraph } = schema.nodes
 
 const editor = ref<HTMLElement | null>(null)
 let view: EditorView | undefined
+
+const paragraphEnter: Command = (state, dispatch) => {
+  const { $from, $to, empty } = state.selection
+  // if outside plain paragraphs, fall back to default
+  if (!$from.sameParent($to) || $from.parent.type !== paragraph || $from.node(-1).type === listItem)
+    return false
+
+  const previous = empty ? $from.nodeBefore : null
+  if (previous?.type === hardBreak) {
+    // Second Enter: paragraph break
+    const breakPosition = $from.pos - previous.nodeSize
+    if (dispatch)
+      dispatch(state.tr.delete(breakPosition, $from.pos).split(breakPosition).scrollIntoView())
+  }
+  else if (dispatch) {
+    // First Enter: inline break
+    dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
+  }
+
+  return true
+}
 
 function plugins() {
   return [
     history(),
     inputRules({
       rules: [
-        textblockTypeInputRule(/^(#{1,6})\s$/, defaultMarkdownParser.schema.nodes.heading, match => ({ level: match[1].length })),
+        textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, match => ({ level: match[1].length })),
+        wrappingInputRule(/^\s*([-+*])\s$/, bulletList),
+        wrappingInputRule(/^(\d+)\.\s$/, orderedList, match => ({ order: Number(match[1]) }),
+          (match, node) => node.childCount + node.attrs.order === Number(match[1])),
       ],
     }),
     keymap({
       'Mod-z': undo,
       'Mod-y': redo,
       'Mod-Shift-z': redo,
-      'Mod-b': toggleMark(defaultMarkdownParser.schema.marks.strong),
-      'Mod-i': toggleMark(defaultMarkdownParser.schema.marks.em),
+      'Mod-b': toggleMark(schema.marks.strong),
+      'Mod-i': toggleMark(schema.marks.em),
+      Enter: chainCommands(splitListItem(listItem), paragraphEnter),
+      Tab: sinkListItem(listItem),
+      'Shift-Tab': liftListItem(listItem),
+      'Mod-Alt-0': setBlockType(paragraph),
+      'Mod-Alt-1': setBlockType(schema.nodes.heading, { level: 1 }),
+      'Mod-Alt-2': setBlockType(schema.nodes.heading, { level: 2 }),
+      'Mod-Alt-3': setBlockType(schema.nodes.heading, { level: 3 }),
+      'Mod-Alt-4': setBlockType(schema.nodes.heading, { level: 4 }),
+      'Mod-Alt-5': setBlockType(schema.nodes.heading, { level: 5 }),
+      'Mod-Alt-6': setBlockType(schema.nodes.heading, { level: 6 }),
     }),
     keymap(baseKeymap),
   ]
@@ -69,9 +106,19 @@ onBeforeUnmount(() => view?.destroy())
 </template>
 
 <style scoped>
+:deep(.ProseMirror p),
+:deep(.ProseMirror ul),
+:deep(.ProseMirror ol) {
+  --pm-paragraph-gap: calc(2 * var(--spacing));
+  margin: 0 0 var(--pm-paragraph-gap);
+}
+
 :deep(.ProseMirror p) {
-  margin: 0 0 1rem;
   line-height: 1.5;
+}
+
+:deep(.ProseMirror li p) {
+  margin: 0;
 }
 
 :deep(.ProseMirror h1),
@@ -80,9 +127,27 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror h4),
 :deep(.ProseMirror h5),
 :deep(.ProseMirror h6) {
+  --heading-label-line-gap: calc(2 * var(--spacing));
+
   font-weight: 600;
   line-height: 1.2;
   margin: 1.5rem 0 0.75rem;
+  overflow: hidden;
+}
+
+:deep(.ProseMirror h1::after),
+:deep(.ProseMirror h2::after),
+:deep(.ProseMirror h3::after),
+:deep(.ProseMirror h4::after),
+:deep(.ProseMirror h5::after),
+:deep(.ProseMirror h6::after) {
+  background: linear-gradient(currentColor, currentColor) calc(1rem + var(--heading-label-line-gap)) center / calc(100% - 1rem - var(--heading-label-line-gap)) 1px no-repeat;
+  display: inline-block;
+  margin-left: calc(2 * var(--spacing));
+  margin-right: -100%;
+  opacity: 0.5;
+  vertical-align: middle;
+  width: 100%;
 }
 
 :deep(.ProseMirror h1::after),
@@ -93,8 +158,6 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror h6::after) {
   font-size: 0.75rem;
   font-weight: 400;
-  margin-left: 0.5rem;
-  opacity: 0.5;
 }
 
 :deep(.ProseMirror h1::after) {
@@ -123,8 +186,15 @@ onBeforeUnmount(() => view?.destroy())
 
 :deep(.ProseMirror ul),
 :deep(.ProseMirror ol) {
-  margin: 0 0 1rem;
   padding-left: 1.5rem;
+}
+
+:deep(.ProseMirror ul) {
+  list-style: disc;
+}
+
+:deep(.ProseMirror ol) {
+  list-style: decimal;
 }
 
 :deep(.ProseMirror blockquote) {
