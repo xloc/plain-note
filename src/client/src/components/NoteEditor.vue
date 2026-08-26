@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { baseKeymap, chainCommands, setBlockType, toggleMark } from 'prosemirror-commands'
+import { gapCursor } from 'prosemirror-gapcursor'
 import { history, redo, undo } from 'prosemirror-history'
 import { inputRules, textblockTypeInputRule, wrappingInputRule } from 'prosemirror-inputrules'
 import { keymap } from 'prosemirror-keymap'
-import { defaultMarkdownParser, defaultMarkdownSerializer } from 'prosemirror-markdown'
 import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list'
-import { type Command, EditorState } from 'prosemirror-state'
+import { type Command, EditorState, TextSelection } from 'prosemirror-state'
+import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tableEditing } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { markdownParser, markdownSerializer, schema } from '../editor/markdown'
+import { TableView } from '../editor/TableView'
 
 const props = defineProps<{ modelValue: string }>()
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
-const { schema } = defaultMarkdownParser
 const { bullet_list: bulletList, hard_break: hardBreak, list_item: listItem, ordered_list: orderedList, paragraph } = schema.nodes
 
 const editor = ref<HTMLElement | null>(null)
@@ -38,6 +40,41 @@ const paragraphEnter: Command = (state, dispatch) => {
   return true
 }
 
+const insertTable: Command = (state, dispatch) => {
+  const { table, table_cell: tableCell, table_row: tableRow } = schema.nodes
+  const row = () => tableRow.create(null, [tableCell.create(), tableCell.create(), tableCell.create()])
+  const node = table.create(null, [row(), row()])
+  if (dispatch) {
+    const start = state.selection.from
+    const transaction = state.tr.replaceSelectionWith(node)
+    const mappedStart = transaction.mapping.map(start, -1)
+    let tablePosition = mappedStart
+    let found = false
+    transaction.doc.nodesBetween(mappedStart, transaction.doc.content.size, (child, position) => {
+      if (found || child.type !== table)
+        return
+      tablePosition = position
+      found = true
+      return false
+    })
+    dispatch(transaction.setSelection(TextSelection.near(transaction.doc.resolve(tablePosition + 1))).scrollIntoView())
+  }
+  return true
+}
+
+const deleteSelectedTablePart: Command = (state, dispatch) => {
+  const { selection } = state
+  if (!(selection instanceof CellSelection))
+    return false
+  if (selection.isColSelection() && selection.isRowSelection())
+    return deleteTable(state, dispatch)
+  if (selection.isColSelection())
+    return deleteColumn(state, dispatch)
+  if (selection.isRowSelection())
+    return deleteRow(state, dispatch)
+  return false
+}
+
 function plugins() {
   return [
     history(),
@@ -55,9 +92,12 @@ function plugins() {
       'Mod-Shift-z': redo,
       'Mod-b': toggleMark(schema.marks.strong),
       'Mod-i': toggleMark(schema.marks.em),
+      Backspace: deleteSelectedTablePart,
+      Delete: deleteSelectedTablePart,
       Enter: chainCommands(splitListItem(listItem), paragraphEnter),
-      Tab: sinkListItem(listItem),
-      'Shift-Tab': liftListItem(listItem),
+      Tab: chainCommands(goToNextCell(1), sinkListItem(listItem)),
+      'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(listItem)),
+      'Mod-Alt-t': insertTable,
       'Mod-Alt-0': setBlockType(paragraph),
       'Mod-Alt-1': setBlockType(schema.nodes.heading, { level: 1 }),
       'Mod-Alt-2': setBlockType(schema.nodes.heading, { level: 2 }),
@@ -67,18 +107,23 @@ function plugins() {
       'Mod-Alt-6': setBlockType(schema.nodes.heading, { level: 6 }),
     }),
     keymap(baseKeymap),
+    tableEditing(),
+    gapCursor(),
   ]
 }
 
 function markdown() {
-  return view ? defaultMarkdownSerializer.serialize(view.state.doc) : ''
+  return view ? markdownSerializer.serialize(view.state.doc) : ''
 }
 
 onMounted(() => {
   view = new EditorView(editor.value!, {
     attributes: { class: 'min-h-full p-4 outline-none' },
+    nodeViews: {
+      table: (node, view, getPos) => new TableView(node, view, getPos),
+    },
     state: EditorState.create({
-      doc: defaultMarkdownParser.parse(props.modelValue),
+      doc: markdownParser.parse(props.modelValue),
       plugins: plugins(),
     }),
     dispatchTransaction(transaction) {
@@ -93,7 +138,7 @@ watch(() => props.modelValue, (content) => {
   if (!view || content === markdown())
     return
   view.updateState(EditorState.create({
-    doc: defaultMarkdownParser.parse(content),
+    doc: markdownParser.parse(content),
     plugins: plugins(),
   }))
 })
@@ -106,6 +151,30 @@ onBeforeUnmount(() => view?.destroy())
 </template>
 
 <style scoped>
+:deep(.ProseMirror-hideselection) {
+  caret-color: transparent;
+}
+
+:deep(.ProseMirror-gapcursor) {
+  display: none;
+  pointer-events: none;
+  position: absolute;
+}
+
+:deep(.ProseMirror-gapcursor::after) {
+  background: currentColor;
+  content: '';
+  display: block;
+  height: 2px;
+  position: absolute;
+  top: -1px;
+  width: 1.25rem;
+}
+
+:deep(.ProseMirror-focused .ProseMirror-gapcursor) {
+  display: block;
+}
+
 :deep(.ProseMirror p),
 :deep(.ProseMirror ul),
 :deep(.ProseMirror ol) {
@@ -195,6 +264,159 @@ onBeforeUnmount(() => view?.destroy())
 
 :deep(.ProseMirror ol) {
   list-style: decimal;
+}
+
+:deep(.ProseMirror .tableWrapper) {
+  --table-control-size: 1.25rem;
+
+  display: inline-block;
+  margin-bottom: calc(2 * var(--spacing));
+  position: relative;
+  vertical-align: top;
+}
+
+:deep(.ProseMirror table) {
+  --table-column-min-width: calc(12 * var(--spacing));
+
+  border-collapse: collapse;
+}
+
+:deep(.ProseMirror th),
+:deep(.ProseMirror td) {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  min-width: var(--table-column-min-width);
+  padding-inline: calc(2 * var(--spacing));
+  text-align: left;
+  vertical-align: top;
+}
+
+:deep(.ProseMirror .selectedCell) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+:deep(.ProseMirror .table-controls) {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+:deep(.ProseMirror .table-control) {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: currentColor;
+  opacity: 0;
+  pointer-events: auto;
+  position: absolute;
+}
+
+:deep(.ProseMirror .table-control:hover),
+:deep(.ProseMirror .table-control:focus-visible),
+:deep(.ProseMirror .table-control.dragging) {
+  opacity: 1;
+}
+
+:deep(.ProseMirror .tableWrapper.dragging-column .table-column-handle:not(.dragging)),
+:deep(.ProseMirror .tableWrapper.dragging-column .table-row-handle),
+:deep(.ProseMirror .tableWrapper.dragging-row .table-row-handle:not(.dragging)),
+:deep(.ProseMirror .tableWrapper.dragging-row .table-column-handle) {
+  visibility: hidden;
+}
+
+:deep(.ProseMirror .table-add-column),
+:deep(.ProseMirror .table-add-row) {
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+:deep(.ProseMirror .table-add-column::before),
+:deep(.ProseMirror .table-add-column::after),
+:deep(.ProseMirror .table-add-row::before),
+:deep(.ProseMirror .table-add-row::after) {
+  background: currentColor;
+  content: '';
+  height: 1px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 0.5rem;
+}
+
+:deep(.ProseMirror .table-add-column::after),
+:deep(.ProseMirror .table-add-row::after) {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+:deep(.ProseMirror .table-add-column) {
+  border-left: 0;
+  width: var(--table-control-size);
+}
+
+:deep(.ProseMirror .table-add-row) {
+  border-top: 0;
+  height: var(--table-control-size);
+}
+
+:deep(.ProseMirror .table-column-handle) {
+  cursor: grab;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, 2px);
+  justify-content: center;
+  padding: var(--spacing);
+  top: 0;
+  touch-action: none;
+  transform: translateY(-100%);
+}
+
+:deep(.ProseMirror .table-column-handle:active) {
+  cursor: grabbing;
+}
+
+:deep(.ProseMirror .table-row-handle) {
+  align-content: center;
+  cursor: grab;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(2, 2px);
+  justify-content: center;
+  padding: var(--spacing);
+  touch-action: none;
+  transform: translateX(-100%);
+}
+
+:deep(.ProseMirror .table-row-handle:active) {
+  cursor: grabbing;
+}
+
+:deep(.ProseMirror .table-handle-dot) {
+  background: currentColor;
+  border-radius: 50%;
+  height: 2px;
+  width: 2px;
+}
+
+:deep(.ProseMirror .table-column-drop-target) {
+  background: var(--color-violet-500, #8b5cf6);
+  border-radius: 9999px;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  width: 3px;
+}
+
+:deep(.ProseMirror .table-row-drop-target) {
+  background: var(--color-violet-500, #8b5cf6);
+  border-radius: 9999px;
+  height: 3px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(-50%);
 }
 
 :deep(.ProseMirror blockquote) {
