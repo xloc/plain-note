@@ -31,20 +31,17 @@ The smoke test expects the local Worker to be running.
 
 ## Cloudflare deployment
 
-Create an R2 bucket and D1 database named `plain-note`, then replace the placeholder D1 ID in `wrangler.jsonc` with the ID returned by Cloudflare. The R2 bucket name can also be changed there if needed.
+### First production deployment
+1. Create an R2 bucket and D1 database named `plain-note`.
+2. Replace `d1_databases.database_id` in `wrangler.jsonc`.
+3. `pnpm deploy`
+4. Configure Cloudflare Access (Auth):
+    1. Enable zero trust
+    3. Allow policy: intended email addresses or identity groups
+    4. Add worker environment variables: 
+        - `TEAM_DOMAIN`: like `https://throbbing-firefly-e880.cloudflareaccess.com`
+        - `POLICY_AUD`: like `64bc46c...` len=64
 
-Build and deploy with:
-
-```sh
-pnpm deploy
-```
-
-Configure authentication after the first deployment:
-
-1. In Cloudflare, open **Workers & Pages**, select the Worker, and go to **Settings > Domains & Routes**.
-2. Enable Cloudflare Access for the deployed hostname.
-3. Configure an Access policy that allows only the intended email addresses or identity groups.
-4. In the Worker's dashboard environment variables, set `TEAM_DOMAIN` to `https://<team-name>.cloudflareaccess.com` and `POLICY_AUD` to the Access application's Audience (AUD) tag. Wrangler preserves these dashboard values on later deploys.
-5. Redeploy, then confirm that a private browser window is sent to the Cloudflare sign-in page before the app loads.
-
-Local Wrangler development uses isolated local R2 and D1 data and bypasses Cloudflare Access on `localhost`, `127.0.0.1`, and `[::1]`.
+### Later deployments
+1. Replace `d1_databases.database_id` in `wrangler.jsonc`
+2. `pnpm deploy`
