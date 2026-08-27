@@ -43,5 +43,9 @@ The smoke test expects the local Worker to be running.
         - `POLICY_AUD`: like `64bc46c...` len=64
 
 ### Later deployments
-1. Replace `d1_databases.database_id` in `wrangler.jsonc`
-2. `pnpm deploy`
+1. `pnpm deploy`
+2. Config conflict:
+    - “Continue?”: No
+    - “Update the local config?”: Yes
+3. `pnpm deploy` again
+4. After deployment: discard `wrangler.jsonc` changes

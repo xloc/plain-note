@@ -8,8 +8,9 @@ import type {
 import { type AuthEnv, requireAccess } from './auth'
 import { getChanges, recordChange } from './index-db'
 import { getRecord, putNote, putTombstone } from './storage'
+import { requireFreeTierCapacity, type UsageEnv } from './usage'
 
-type Env = AuthEnv & {
+type Env = AuthEnv & UsageEnv & {
   ASSETS: Fetcher
   DB: D1Database
   NOTES: R2Bucket
@@ -38,6 +39,10 @@ export default {
 async function api(request: Request, env: Env, url: URL) {
   if (request.method === 'GET' && url.pathname === '/api/health')
     return json({ ok: true })
+
+  const usageError = await requireFreeTierCapacity(request, env)
+  if (usageError)
+    return usageError
 
   if (request.method === 'GET' && url.pathname === '/api/sync') {
     const after = Number(url.searchParams.get('after') ?? 0)
