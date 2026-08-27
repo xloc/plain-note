@@ -3,6 +3,7 @@
   "name": "plain-note",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-08-24",
+  "keep_vars": true,
   "assets": {
     "directory": "./src/client/dist",
     "binding": "ASSETS",

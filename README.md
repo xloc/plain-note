@@ -39,4 +39,12 @@ Build and deploy with:
 pnpm deploy
 ```
 
-Protect the deployed hostname with Cloudflare Access before storing personal notes. Local Wrangler development uses isolated local R2 and D1 data by default.
+Configure authentication after the first deployment:
+
+1. In Cloudflare, open **Workers & Pages**, select the Worker, and go to **Settings > Domains & Routes**.
+2. Enable Cloudflare Access for the deployed hostname.
+3. Configure an Access policy that allows only the intended email addresses or identity groups.
+4. In the Worker's dashboard environment variables, set `TEAM_DOMAIN` to `https://<team-name>.cloudflareaccess.com` and `POLICY_AUD` to the Access application's Audience (AUD) tag. Wrangler preserves these dashboard values on later deploys.
+5. Redeploy, then confirm that a private browser window is sent to the Cloudflare sign-in page before the app loads.
+
+Local Wrangler development uses isolated local R2 and D1 data and bypasses Cloudflare Access on `localhost`, `127.0.0.1`, and `[::1]`.

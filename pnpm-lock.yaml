@@ -86,19 +86,22 @@ importers:
 
   src/worker:
     dependencies:
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
       yaml:
         specifier: ^2.8.1
         version: 2.9.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: latest
-        version: 5.20260825.1
+        version: 5.20260826.1
       typescript:
         specifier: ~5.7.2
         version: 5.7.3
       wrangler:
         specifier: latest
-        version: 4.126.0(@cloudflare/workers-types@5.20260825.1)
+        version: 4.126.0(@cloudflare/workers-types@5.20260826.1)
 
 packages:
 
@@ -162,8 +165,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@cloudflare/workers-types@5.20260825.1':
-    resolution: {integrity: sha512-/XZntbK+BlJWC5jxkaDNhnDLr2Bf2627sZ6VMrxqKrnc84pc6gNu5NdAyaTkZn1LzQVFIa3SL7V/7veLF59P7w==}
+  '@cloudflare/workers-types@5.20260826.1':
+    resolution: {integrity: sha512-hyW0QHvJYKhsMTAx1YZkbhcXBr17Brl1xZwvVExYmB5pAExJCCzAEouKNGwag2H+yBlqLay3X3kZoiJoGu2DRw==}
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -1183,6 +1186,9 @@ packages:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
 
+  jose@6.2.10:
+    resolution: {integrity: sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g==}
+
   kleur@4.1.5:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
@@ -1642,7 +1648,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20260825.1':
     optional: true
 
-  '@cloudflare/workers-types@5.20260825.1': {}
+  '@cloudflare/workers-types@5.20260826.1': {}
 
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
@@ -2419,6 +2425,8 @@ snapshots:
 
   jiti@2.7.0: {}
 
+  jose@6.2.10: {}
+
   kleur@4.1.5: {}
 
   lightningcss-android-arm64@1.32.0:
@@ -2802,7 +2810,7 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260825.1
       '@cloudflare/workerd-windows-64': 1.20260825.1
 
-  wrangler@4.126.0(@cloudflare/workers-types@5.20260825.1):
+  wrangler@4.126.0(@cloudflare/workers-types@5.20260826.1):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260825.1)
@@ -2813,7 +2821,7 @@ snapshots:
       unenv: 2.0.0-rc.24
       workerd: 1.20260825.1
     optionalDependencies:
-      '@cloudflare/workers-types': 5.20260825.1
+      '@cloudflare/workers-types': 5.20260826.1
       fsevents: 2.3.3
     transitivePeerDependencies:
       - bufferutil

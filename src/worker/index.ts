@@ -5,10 +5,11 @@ import type {
   PutNoteRequest,
   Tombstone,
 } from '../shared/note'
+import { type AuthEnv, requireAccess } from './auth'
 import { getChanges, recordChange } from './index-db'
 import { getRecord, putNote, putTombstone } from './storage'
 
-type Env = {
+type Env = AuthEnv & {
   ASSETS: Fetcher
   DB: D1Database
   NOTES: R2Bucket
@@ -19,6 +20,10 @@ export default {
     const url = new URL(request.url)
     if (!url.pathname.startsWith('/api/'))
       return env.ASSETS.fetch(request)
+
+    const authError = await requireAccess(request, env)
+    if (authError)
+      return authError
 
     try {
       return await api(request, env, url)
