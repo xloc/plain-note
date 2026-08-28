@@ -9,7 +9,7 @@ import {
   SignalSlashIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
-import { useOnline } from '@vueuse/core'
+import { useOnline, useSwipe } from '@vueuse/core'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import NoteEditor from './components/NoteEditor.vue'
 import { notePreview, noteTitle, useNotesStore } from './stores/notes'
@@ -17,7 +17,9 @@ import { notePreview, noteTitle, useNotesStore } from './stores/notes'
 const notes = useNotesStore()
 const online = useOnline()
 const noteNav = ref<HTMLElement | null>(null)
+const editorScreen = ref<HTMLElement | null>(null)
 const showNoteList = ref(true)
+let swipeFromEdge = false
 const sync = () => void notes.sync()
 const formatUpdatedAt = (timestamp: number) => {
   const date = new Date(timestamp)
@@ -36,6 +38,17 @@ const openNote = (id: string) => {
   notes.select(id)
   showNoteList.value = false
 }
+useSwipe(editorScreen, {
+  threshold: 80,
+  onSwipeStart: (event) => {
+    const touch = event.touches[0]
+    swipeFromEdge = Boolean(touch && window.innerWidth < 768 && touch.clientX <= 32)
+  },
+  onSwipeEnd: (event, direction) => {
+    if (event.type === 'touchend' && swipeFromEdge && direction === 'right') showNoteList.value = true
+    swipeFromEdge = false
+  },
+})
 const noteSections = computed(() => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -137,6 +150,7 @@ watch(
 
     <template v-if="notes.ready">
       <article
+        ref="editorScreen"
         class="relative min-w-0 flex-1 flex-col md:block"
         :class="showNoteList ? 'hidden md:block' : 'flex'"
         v-if="notes.selectedNote"
