@@ -3,13 +3,20 @@
   "private": true,
   "packageManager": "pnpm@11.21.0",
   "scripts": {
-    "build": "pnpm --dir src/client build",
-    "dev": "pnpm --parallel --stream --filter @plain-note/worker --filter @plain-note/client dev",
-    "dev:client": "pnpm --dir src/client dev",
-    "dev:worker": "pnpm --dir src/worker dev",
-    "deploy": "pnpm build && pnpm --dir src/worker deploy",
+    "build": "vp run -F @plain-note/client build",
+    "check": "vp check --no-fmt",
+    "dev": "vp run -F @plain-note/client -F @plain-note/worker --parallel dev",
+    "dev:client": "vp run -F @plain-note/client dev",
+    "dev:worker": "vp run -F @plain-note/worker dev",
+    "deploy": "vp run -F @plain-note/client build && vp run -F @plain-note/worker deploy",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
     "smoke": "bash scripts/smoke-api.sh",
-    "test": "pnpm --dir src/client test",
-    "typecheck": "pnpm --dir src/worker typecheck"
+    "test": "vp run -F @plain-note/client test",
+    "typecheck": "vp run -F @plain-note/worker typecheck"
+  },
+  "devDependencies": {
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

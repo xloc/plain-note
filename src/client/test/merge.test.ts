@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test } from 'vite-plus/test'
 import { markdownBlocks, mergeMarkdown } from '../src/editor/merge.ts'
 
 test('finds top-level Markdown blocks', () => {
