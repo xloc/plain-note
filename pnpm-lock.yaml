@@ -80,6 +80,9 @@ importers:
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
+      uuid:
+        specifier: ^14.0.2
+        version: 14.0.2
       vue:
         specifier: ^3.5.13
         version: 3.5.41(typescript@5.7.3)
@@ -1886,6 +1889,10 @@ packages:
   unenv@2.0.0-rc.24:
     resolution: {integrity: sha512-i7qRCmY42zmCwnYlh9H2SvLEypEFGye5iRmEMKjcGi7zk9UquigRjFtTLz0TYqr0ZGLZhaMHl/foy1bZR+Cwlw==}
 
+  uuid@14.0.2:
+    resolution: {integrity: sha512-xZe/16rV4aa+HGSOCiY2YeLT1OybRLrrkL/Rqaq7p7GMVXjFh+6wN4oMYgjFmnSnhY8t6Xpdl2l9qmnHYuMHwQ==}
+    hasBin: true
+
   vite-plus@0.3.0:
     resolution: {integrity: sha512-GNWbWuWD37frCSFrz6MLzUo62bTv5IOJozHEgZYOkxsLkuQtTwm4TowzpfoGrSsfwhAAtfPd/sK1Y0+v1SwhZA==}
     engines: {node: ^20.19.0 || ^22.18.0 || >=24.11.0}
@@ -3378,6 +3385,8 @@ snapshots:
   unenv@2.0.0-rc.24:
     dependencies:
       pathe: 2.0.3
+
+  uuid@14.0.2: {}
 
   vite-plus@0.3.0(@voidzero-dev/vite-plus-core@0.3.0(esbuild@0.28.1)(jiti@2.7.0)(typescript@5.7.3)(yaml@2.9.0))(esbuild@0.28.1)(jiti@2.7.0)(typescript@5.7.3)(yaml@2.9.0):
     dependencies:

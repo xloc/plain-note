@@ -2,6 +2,7 @@
 import {
   ArrowPathIcon,
   CheckCircleIcon,
+  ChevronLeftIcon,
   CloudArrowUpIcon,
   ExclamationCircleIcon,
   PencilSquareIcon,
@@ -16,7 +17,16 @@ import { notePreview, noteTitle, useNotesStore } from './stores/notes'
 const notes = useNotesStore()
 const online = useOnline()
 const noteNav = ref<HTMLElement | null>(null)
+const showNoteList = ref(true)
 const sync = () => void notes.sync()
+const createNote = () => {
+  showNoteList.value = false
+  void notes.createNote()
+}
+const openNote = (id: string) => {
+  notes.select(id)
+  showNoteList.value = false
+}
 const noteSections = computed(() => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -69,52 +79,74 @@ watch(
 </script>
 
 <template>
-  <main class="flex h-screen overflow-hidden">
-    <aside class="flex w-64 shrink-0 flex-col bg-stone-100">
+  <main class="safe-area flex h-dvh overflow-hidden">
+    <aside class="w-full shrink-0 flex-col bg-stone-100 md:flex md:w-64" :class="showNoteList ? 'flex' : 'hidden'">
       <template v-if="notes.ready">
-        <nav ref="noteNav" class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <section v-for="section in noteSections" :key="section.label">
-            <h2 class="bg-white px-2 text-sm">{{ section.label }}</h2>
-            <button
-              class="block w-full p-2 text-start hover:bg-violet-100"
-              :class="{ 'bg-violet-100': note.id === notes.selectedId }"
-              v-for="note in section.notes"
-              :key="note.id"
-              type="button"
-              @click="notes.select(note.id)"
-            >
-              <!-- title -->
-              <div class="flex">
-                <div class="min-w-0 flex-1 truncate font-semibold text-stone-800">
-                  {{ noteTitle(note.content) }}
+        <header class="shrink-0 px-4 pt-4 pb-2 md:hidden">
+          <h1 class="text-4xl font-bold">Notes</h1>
+        </header>
+        <nav ref="noteNav" class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 py-4 md:gap-4 md:p-2">
+          <section class="flex flex-col gap-2" v-for="section in noteSections" :key="section.label">
+            <h2 class="px-2 text-xl font-semibold md:text-base">{{ section.label }}</h2>
+            <div class="overflow-hidden rounded-xl bg-white">
+              <button
+                class="block w-full border-b border-stone-200 px-4 py-2 text-start last:border-b-0 hover:bg-violet-100"
+                :class="{ 'bg-violet-100': note.id === notes.selectedId }"
+                v-for="note in section.notes"
+                :key="note.id"
+                type="button"
+                @click="openNote(note.id)"
+              >
+                <!-- title -->
+                <div class="flex">
+                  <div class="min-w-0 flex-1 truncate text-lg font-semibold text-stone-800 md:text-base">
+                    {{ noteTitle(note.content) }}
+                  </div>
+                  <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
                 </div>
-                <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
-              </div>
-              <!-- preview -->
-              <div class="line-clamp-1 h-5 text-sm leading-5 text-stone-800">
-                {{ notePreview(note.content) }}
-              </div>
-            </button>
+                <!-- preview -->
+                <div class="line-clamp-1 h-5 text-sm leading-5 text-stone-800 md:text-xs">
+                  {{ notePreview(note.content) }}
+                </div>
+              </button>
+            </div>
           </section>
         </nav>
+        <footer class="flex shrink-0 justify-end md:hidden">
+          <button
+            class="m-2 rounded-lg bg-stone-200 p-2 text-stone-800 hover:bg-stone-100"
+            type="button"
+            title="New note"
+            @click="createNote"
+          >
+            <PencilSquareIcon class="size-5" />
+          </button>
+        </footer>
       </template>
     </aside>
 
     <template v-if="notes.ready">
-      <article class="relative min-w-0 flex-1" v-if="notes.selectedNote">
-        <header class="absolute top-0 right-0 left-0 z-10 m-2 flex items-center justify-between">
+      <article
+        class="relative min-w-0 flex-1 flex-col md:block"
+        :class="showNoteList ? 'hidden md:block' : 'flex'"
+        v-if="notes.selectedNote"
+      >
+        <header class="z-10 m-2 flex shrink-0 items-center justify-between md:absolute md:top-0 md:right-0 md:left-0">
           <div class="flex items-center gap-2">
+            <button class="p-2 text-stone-800 md:hidden" type="button" title="Notes" @click="showNoteList = true">
+              <ChevronLeftIcon class="size-5" />
+            </button>
             <button
-              class="rounded-lg bg-stone-100 p-2 text-stone-800 backdrop-blur-lg hover:bg-stone-100"
+              class="rounded-lg bg-stone-100 p-2 text-stone-800 hover:bg-stone-100"
               type="button"
               title="New note"
-              @click="notes.createNote"
+              @click="createNote"
             >
               <PencilSquareIcon class="size-5" />
             </button>
             <button
               v-if="notes.selectedNote && !notes.selectedNote.deleted"
-              class="rounded-lg bg-red-100 p-2 text-red-500 backdrop-blur-lg hover:bg-red-50"
+              class="rounded-lg bg-red-100 p-2 text-red-500 hover:bg-red-50"
               type="button"
               title="Delete note"
               @click="notes.deleteSelected"
@@ -122,7 +154,7 @@ watch(
               <TrashIcon class="size-5" />
             </button>
             <button
-              class="rounded-lg bg-stone-100 p-2 text-stone-700 backdrop-blur-lg hover:bg-stone-100"
+              class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-100"
               type="button"
               title="Sync now"
               :disabled="notes.syncing"
@@ -131,7 +163,7 @@ watch(
               <ArrowPathIcon class="size-5" />
             </button>
             <button
-              class="rounded-lg bg-red-100 p-2 text-red-500 backdrop-blur-lg hover:bg-red-50"
+              class="rounded-lg bg-red-100 p-2 text-red-500 hover:bg-red-50"
               type="button"
               title="Reset local data"
               :disabled="notes.syncing"
@@ -144,7 +176,7 @@ watch(
             </button>
           </div>
         </header>
-        <div class="absolute inset-0 overflow-y-auto">
+        <div class="min-h-0 flex-1 overflow-y-auto md:absolute md:inset-0">
           <NoteEditor
             class="min-h-0 flex-1"
             :model-value="notes.selectedNote.content"
@@ -152,10 +184,12 @@ watch(
           />
         </div>
         <footer
-          class="absolute right-0 bottom-0 flex items-center gap-3 rounded-tl-lg bg-stone-100 px-4 py-1 text-sm text-stone-700"
+          class="flex shrink-0 items-center gap-3 self-end rounded-tl-lg bg-stone-100 px-4 py-1 text-sm text-stone-700 md:absolute md:right-0 md:bottom-0"
         >
-          <span class=""> {{ wordCount }} {{ wordCount === 1 ? 'word' : 'words' }} </span>
-          <span class=""> {{ characterCount }} {{ characterCount === 1 ? 'character' : 'characters' }} </span>
+          <span class="hidden sm:inline"> {{ wordCount }} {{ wordCount === 1 ? 'word' : 'words' }} </span>
+          <span class="hidden sm:inline">
+            {{ characterCount }} {{ characterCount === 1 ? 'character' : 'characters' }}
+          </span>
           <span role="status" :title="notes.syncMessage">
             <SignalSlashIcon v-if="!online" class="size-5 text-stone-400" />
             <ArrowPathIcon v-else-if="notes.syncing" class="size-5 text-blue-500" />
@@ -173,3 +207,9 @@ watch(
     </template>
   </main>
 </template>
+
+<style scoped>
+.safe-area {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+</style>

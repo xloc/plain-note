@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { v4 as randomUUID } from 'uuid'
 import { computed, ref, toRaw } from 'vue'
 import type { Change, Note, NoteRecord, Tombstone } from '../../../shared/note'
 import { ApiConflict, deleteNote, getChanges, getNote, putNote } from '../api'
@@ -47,13 +48,13 @@ export const useNotesStore = defineStore('notes', () => {
   async function createNote() {
     const now = Date.now()
     const note: LocalNote = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       content: '',
       tags: [],
       resources: [],
       createdAt: now,
       updatedAt: now,
-      revision: crypto.randomUUID(),
+      revision: randomUUID(),
       base: null,
       deleted: false,
       syncState: 'pending',
@@ -68,7 +69,7 @@ export const useNotesStore = defineStore('notes', () => {
     const note = selectedNote.value
     if (!note) return
     Object.assign(note, update, {
-      revision: crypto.randomUUID(),
+      revision: randomUUID(),
       updatedAt: Date.now(),
       syncState: 'pending',
     })
@@ -85,7 +86,7 @@ export const useNotesStore = defineStore('notes', () => {
     } else {
       Object.assign(note, {
         deleted: true,
-        revision: crypto.randomUUID(),
+        revision: randomUUID(),
         updatedAt: Date.now(),
         syncState: 'pending',
       })
@@ -290,7 +291,7 @@ export const useNotesStore = defineStore('notes', () => {
       }
 
       local.base = copyRecord(remote)
-      local.revision = crypto.randomUUID()
+      local.revision = randomUUID()
       local.updatedAt = Date.now()
       local.syncState = 'pending'
       await saveNote(local)
@@ -307,7 +308,7 @@ export const useNotesStore = defineStore('notes', () => {
 
     local.content = mergeMarkdown('deleted' in local.base ? '' : local.base.content, remote.content, local.content)
     local.base = copyNote(remote)
-    local.revision = crypto.randomUUID()
+    local.revision = randomUUID()
     local.updatedAt = Date.now()
     local.syncState = 'pending'
     await saveNote(local)

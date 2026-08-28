@@ -201,7 +201,7 @@ function markdown() {
 
 onMounted(() => {
   view = new EditorView(editor.value!, {
-    attributes: { class: 'min-h-full p-4 pt-8 outline-none' },
+    attributes: { class: 'min-h-full px-4 py-2 md:pt-14 outline-none' },
     nodeViews: {
       table: (node, view, getPos) => new TableView(node, view, getPos),
     },
@@ -299,7 +299,7 @@ onBeforeUnmount(() => view?.destroy())
 
   font-weight: 600;
   line-height: 1.2;
-  margin: 1.5rem 0 0.75rem;
+  margin: calc(4 * var(--spacing)) 0;
   overflow: hidden;
 }
 
