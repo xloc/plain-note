@@ -35,7 +35,7 @@ export async function clearLocalData() {
 }
 
 export async function getMeta(key: string) {
-  const row = await request<{ key: string, value: string | number } | undefined>(
+  const row = await request<{ key: string; value: string | number } | undefined>(
     (await database).transaction('meta').objectStore('meta').get(key),
   )
   return row?.value
@@ -49,10 +49,12 @@ function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const result = indexedDB.open('plain-note', 2)
     result.onupgradeneeded = () => {
-      if (result.result.objectStoreNames.contains('notes'))
+      if (result.result.objectStoreNames.contains('notes')) {
         result.result.deleteObjectStore('notes')
-      if (result.result.objectStoreNames.contains('meta'))
+      }
+      if (result.result.objectStoreNames.contains('meta')) {
         result.result.deleteObjectStore('meta')
+      }
       result.result.createObjectStore('notes', { keyPath: 'id' })
       result.result.createObjectStore('meta', { keyPath: 'key' })
     }

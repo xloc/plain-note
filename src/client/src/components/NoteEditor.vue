@@ -32,17 +32,18 @@ let view: EditorView | undefined
 const paragraphEnter: Command = (state, dispatch) => {
   const { $from, $to, empty } = state.selection
   // if outside plain paragraphs, fall back to default
-  if (!$from.sameParent($to) || $from.parent.type !== paragraph || $from.node(-1).type === listItem)
+  if (!$from.sameParent($to) || $from.parent.type !== paragraph || $from.node(-1).type === listItem) {
     return false
+  }
 
   const previous = empty ? $from.nodeBefore : null
   if (previous?.type === hardBreak) {
     // Second Enter: paragraph break
     const breakPosition = $from.pos - previous.nodeSize
-    if (dispatch)
+    if (dispatch) {
       dispatch(state.tr.delete(breakPosition, $from.pos).split(breakPosition).scrollIntoView())
-  }
-  else if (dispatch) {
+    }
+  } else if (dispatch) {
     // First Enter: inline break
     dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
   }
@@ -61,8 +62,7 @@ const insertTable: Command = (state, dispatch) => {
     let tablePosition = mappedStart
     let found = false
     transaction.doc.nodesBetween(mappedStart, transaction.doc.content.size, (child, position) => {
-      if (found || child.type !== table)
-        return
+      if (found || child.type !== table) return
       tablePosition = position
       found = true
       return false
@@ -74,45 +74,45 @@ const insertTable: Command = (state, dispatch) => {
 
 const deleteSelectedTablePart: Command = (state, dispatch) => {
   const { selection } = state
-  if (!(selection instanceof CellSelection))
-    return false
-  if (selection.isColSelection() && selection.isRowSelection())
-    return deleteTable(state, dispatch)
-  if (selection.isColSelection())
-    return deleteColumn(state, dispatch)
-  if (selection.isRowSelection())
-    return deleteRow(state, dispatch)
+  if (!(selection instanceof CellSelection)) return false
+  if (selection.isColSelection() && selection.isRowSelection()) return deleteTable(state, dispatch)
+  if (selection.isColSelection()) return deleteColumn(state, dispatch)
+  if (selection.isRowSelection()) return deleteRow(state, dispatch)
   return false
 }
 
 const insertTab: Command = (state, dispatch) => {
-  if (dispatch)
+  if (dispatch) {
     dispatch(state.tr.insertText(tabCharacter).scrollIntoView())
+  }
   return true
 }
 
 const removeTab: Command = (state, dispatch) => {
   const { $from, empty } = state.selection
-  if (empty && $from.nodeBefore?.isText && $from.nodeBefore.text?.endsWith(tabCharacter) && dispatch)
+  if (empty && $from.nodeBefore?.isText && $from.nodeBefore.text?.endsWith(tabCharacter) && dispatch) {
     dispatch(state.tr.delete($from.pos - tabCharacter.length, $from.pos).scrollIntoView())
+  }
   return true
 }
 
 const insertCodeIndentation: Command = (state, dispatch) => {
   const { $from, $to } = state.selection
-  if (!$from.sameParent($to) || $from.parent.type !== codeBlock)
+  if (!$from.sameParent($to) || $from.parent.type !== codeBlock) {
     return false
-  if (dispatch)
+  }
+  if (dispatch) {
     dispatch(state.tr.insertText(codeIndentation).scrollIntoView())
+  }
   return true
 }
 
 const removeCodeIndentation: Command = (state, dispatch) => {
   const { $from, $to, empty } = state.selection
-  if (!$from.sameParent($to) || $from.parent.type !== codeBlock)
+  if (!$from.sameParent($to) || $from.parent.type !== codeBlock) {
     return false
-  if (!empty)
-    return true
+  }
+  if (!empty) return true
 
   const textBefore = $from.parent.textBetween(0, $from.parentOffset)
   const lineStart = textBefore.lastIndexOf('\n') + 1
@@ -127,14 +127,16 @@ const removeCodeIndentation: Command = (state, dispatch) => {
 
 const codeBlockEnter: Command = (state, dispatch) => {
   const { $from, $to } = state.selection
-  if (!$from.sameParent($to) || $from.parent.type !== codeBlock)
+  if (!$from.sameParent($to) || $from.parent.type !== codeBlock) {
     return false
+  }
 
   const textBefore = $from.parent.textBetween(0, $from.parentOffset)
   const line = textBefore.slice(textBefore.lastIndexOf('\n') + 1)
   const indentation = line.match(/^[ \t]*/)?.[0] ?? ''
-  if (dispatch)
+  if (dispatch) {
     dispatch(state.tr.insertText(`\n${indentation}`).scrollIntoView())
+  }
   return true
 }
 
@@ -156,10 +158,14 @@ function plugins() {
           const transaction = state.tr.replaceWith(start - 1, end, horizontalRule.create())
           return transaction.setSelection(NodeSelection.create(transaction.doc, start - 1))
         }),
-        textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, match => ({ level: match[1].length })),
+        textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({ level: match[1].length })),
         wrappingInputRule(/^\s*([-+*])\s$/, bulletList),
-        wrappingInputRule(/^(\d+)\.\s$/, orderedList, match => ({ order: Number(match[1]) }),
-          (match, node) => node.childCount + node.attrs.order === Number(match[1])),
+        wrappingInputRule(
+          /^(\d+)\.\s$/,
+          orderedList,
+          (match) => ({ order: Number(match[1]) }),
+          (match, node) => node.childCount + node.attrs.order === Number(match[1]),
+        ),
       ],
     }),
     keymap({
@@ -205,20 +211,25 @@ onMounted(() => {
     }),
     dispatchTransaction(transaction) {
       view!.updateState(view!.state.apply(transaction))
-      if (transaction.docChanged)
+      if (transaction.docChanged) {
         emit('update:modelValue', markdown())
+      }
     },
   })
 })
 
-watch(() => props.modelValue, (content) => {
-  if (!view || content === markdown())
-    return
-  view.updateState(EditorState.create({
-    doc: markdownParser.parse(content),
-    plugins: plugins(),
-  }))
-})
+watch(
+  () => props.modelValue,
+  (content) => {
+    if (!view || content === markdown()) return
+    view.updateState(
+      EditorState.create({
+        doc: markdownParser.parse(content),
+        plugins: plugins(),
+      }),
+    )
+  },
+)
 
 onBeforeUnmount(() => view?.destroy())
 </script>
@@ -298,7 +309,8 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror h4::after),
 :deep(.ProseMirror h5::after),
 :deep(.ProseMirror h6::after) {
-  background: linear-gradient(currentColor, currentColor) calc(1rem + var(--heading-label-line-gap)) center / calc(100% - 1rem - var(--heading-label-line-gap)) 1px no-repeat;
+  background: linear-gradient(currentColor, currentColor) calc(1rem + var(--heading-label-line-gap)) center /
+    calc(100% - 1rem - var(--heading-label-line-gap)) 1px no-repeat;
   display: inline-block;
   margin-left: calc(2 * var(--spacing));
   margin-right: -100%;

@@ -33,8 +33,9 @@ export async function getNote(id: string) {
 
 export async function getChanges(generation: string | null, after: number) {
   const query = new URLSearchParams({ after: String(after) })
-  if (generation)
+  if (generation) {
     query.set('generation', generation)
+  }
   return api<SyncResponse>(`/api/sync?${query}`)
 }
 
@@ -43,10 +44,15 @@ async function api<T extends object>(path: string, init?: RequestInit) {
     ...init,
     headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
   })
-  const body = await response.json() as T | ConflictResponse | { error: string }
-  if (response.status === 409)
+  const body = (await response.json()) as T | ConflictResponse | { error: string }
+  if (response.status === 409) {
     throw new ApiConflict((body as ConflictResponse).current)
-  if (!response.ok)
-    throw new Error('error' in body ? body.error : `Request failed with ${response.status}`)
+  }
+
+  if (!response.ok) {
+    const message = 'error' in body ? body.error : `Request failed with ${response.status}`
+    throw new Error(message)
+  }
+
   return body as T
 }

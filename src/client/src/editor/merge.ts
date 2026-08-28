@@ -9,22 +9,20 @@ type Edit = {
 const divider = '---'
 
 export function mergeMarkdown(base: string, server: string, device: string) {
-  if (server === device)
-    return server
-  if (server === base)
-    return device
-  if (device === base)
-    return server
+  if (server === device) return server
+  if (server === base) return device
+  if (device === base) return server
 
   return mergeBlocks(markdownBlocks(base), markdownBlocks(server), markdownBlocks(device)).join('\n\n')
 }
 
 export function markdownBlocks(content: string) {
   const lines = content.split('\n')
-  return markdownParser.tokenizer.parse(content, {})
-    .flatMap(token => token.level === 0 && token.map
-      ? [lines.slice(token.map[0], token.map[1]).join('\n').replace(/\n+$/, '')]
-      : [])
+  return markdownParser.tokenizer
+    .parse(content, {})
+    .flatMap((token) =>
+      token.level === 0 && token.map ? [lines.slice(token.map[0], token.map[1]).join('\n').replace(/\n+$/, '')] : [],
+    )
 }
 
 function mergeBlocks(base: string[], server: string[], device: string[]) {
@@ -57,9 +55,10 @@ function mergeBlocks(base: string[], server: string[], device: string[]) {
       continue
     }
 
-    const overlaps = serverHere && deviceHere
-      || serverHere && deviceEdit !== undefined && deviceEdit.from < serverEdit.to
-      || deviceHere && serverEdit !== undefined && serverEdit.from < deviceEdit.to
+    const overlaps =
+      (serverHere && deviceHere) ||
+      (serverHere && deviceEdit !== undefined && deviceEdit.from < serverEdit.to) ||
+      (deviceHere && serverEdit !== undefined && serverEdit.from < deviceEdit.to)
 
     if (overlaps) {
       let end = Math.max(serverHere ? serverEdit.to : position, deviceHere ? deviceEdit.to : position)
@@ -121,9 +120,10 @@ function edits(base: string[], target: string[]) {
   const common = Array.from({ length: base.length + 1 }, () => new Uint32Array(target.length + 1))
   for (let baseIndex = base.length - 1; baseIndex >= 0; baseIndex--) {
     for (let targetIndex = target.length - 1; targetIndex >= 0; targetIndex--) {
-      common[baseIndex][targetIndex] = base[baseIndex] === target[targetIndex]
-        ? common[baseIndex + 1][targetIndex + 1] + 1
-        : Math.max(common[baseIndex + 1][targetIndex], common[baseIndex][targetIndex + 1])
+      common[baseIndex][targetIndex] =
+        base[baseIndex] === target[targetIndex]
+          ? common[baseIndex + 1][targetIndex + 1] + 1
+          : Math.max(common[baseIndex + 1][targetIndex], common[baseIndex][targetIndex + 1])
     }
   }
 
@@ -132,10 +132,9 @@ function edits(base: string[], target: string[]) {
   let targetIndex = 0
   let current: Edit | undefined
 
-  const begin = () => current ??= { from: baseIndex, to: baseIndex, blocks: [] }
+  const begin = () => (current ??= { from: baseIndex, to: baseIndex, blocks: [] })
   const finish = () => {
-    if (current)
-      result.push(current)
+    if (current) result.push(current)
     current = undefined
   }
 
@@ -144,15 +143,13 @@ function edits(base: string[], target: string[]) {
       finish()
       baseIndex++
       targetIndex++
-    }
-    else if (targetIndex < target.length && (
-      baseIndex === base.length
-      || common[baseIndex][targetIndex + 1] > common[baseIndex + 1][targetIndex]
-    )) {
+    } else if (
+      targetIndex < target.length &&
+      (baseIndex === base.length || common[baseIndex][targetIndex + 1] > common[baseIndex + 1][targetIndex])
+    ) {
       begin().blocks.push(target[targetIndex])
       targetIndex++
-    }
-    else {
+    } else {
       begin()
       baseIndex++
       current!.to = baseIndex
@@ -163,9 +160,11 @@ function edits(base: string[], target: string[]) {
 }
 
 function sameEdit(left: Edit, right: Edit) {
-  return left.to === right.to
-    && left.blocks.length === right.blocks.length
-    && left.blocks.every((block, index) => block === right.blocks[index])
+  return (
+    left.to === right.to &&
+    left.blocks.length === right.blocks.length &&
+    left.blocks.every((block, index) => block === right.blocks[index])
+  )
 }
 
 function applyEdits(base: string[], from: number, to: number, changes: Edit[]) {

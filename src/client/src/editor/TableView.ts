@@ -1,5 +1,12 @@
 import type { Node } from 'prosemirror-model'
-import { CellSelection, TableMap, addColumn as addTableColumn, addRow as addTableRow, moveTableColumn, moveTableRow } from 'prosemirror-tables'
+import {
+  CellSelection,
+  TableMap,
+  addColumn as addTableColumn,
+  addRow as addTableRow,
+  moveTableColumn,
+  moveTableRow,
+} from 'prosemirror-tables'
 import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
 
 export class TableView implements NodeView {
@@ -20,7 +27,11 @@ export class TableView implements NodeView {
   resizeObserver: ResizeObserver
   animationFrame = 0
 
-  constructor(private node: Node, private view: EditorView, private getPos: () => number | undefined) {
+  constructor(
+    private node: Node,
+    private view: EditorView,
+    private getPos: () => number | undefined,
+  ) {
     this.dom.className = 'tableWrapper'
     this.table.append(this.contentDOM)
     this.dom.append(this.table, this.controls)
@@ -30,13 +41,13 @@ export class TableView implements NodeView {
     this.addColumnButton.className = 'table-control table-add-column'
     this.addColumnButton.type = 'button'
     this.addColumnButton.setAttribute('aria-label', 'Add column to the right')
-    this.addColumnButton.addEventListener('mousedown', event => event.preventDefault())
+    this.addColumnButton.addEventListener('mousedown', (event) => event.preventDefault())
     this.addColumnButton.addEventListener('click', () => this.addColumn())
 
     this.addRowButton.className = 'table-control table-add-row'
     this.addRowButton.type = 'button'
     this.addRowButton.setAttribute('aria-label', 'Add row below')
-    this.addRowButton.addEventListener('mousedown', event => event.preventDefault())
+    this.addRowButton.addEventListener('mousedown', (event) => event.preventDefault())
     this.addRowButton.addEventListener('click', () => this.addRow())
     this.dropIndicator.className = 'table-drop-target'
     this.dropIndicator.hidden = true
@@ -48,14 +59,14 @@ export class TableView implements NodeView {
   }
 
   update(node: Node) {
-    if (node.type !== this.node.type)
-      return false
+    if (node.type !== this.node.type) return false
     this.node = node
     const map = TableMap.get(node)
-    if (map.width !== this.columnHandles.length || map.height !== this.rowHandles.length)
+    if (map.width !== this.columnHandles.length || map.height !== this.rowHandles.length) {
       this.rebuildHandles()
-    else
+    } else {
       this.scheduleLayout()
+    }
     return true
   }
 
@@ -64,8 +75,10 @@ export class TableView implements NodeView {
   }
 
   ignoreMutation(mutation: ViewMutationRecord) {
-    return this.controls.contains(mutation.target)
-      || (mutation.type === 'attributes' && mutation.target === this.dom && mutation.attributeName === 'class')
+    return (
+      this.controls.contains(mutation.target) ||
+      (mutation.type === 'attributes' && mutation.target === this.dom && mutation.attributeName === 'class')
+    )
   }
 
   destroy() {
@@ -75,8 +88,7 @@ export class TableView implements NodeView {
   }
 
   private rebuildHandles() {
-    for (const handle of [...this.columnHandles, ...this.rowHandles])
-      handle.remove()
+    for (const handle of [...this.columnHandles, ...this.rowHandles]) handle.remove()
 
     const map = TableMap.get(this.node)
     this.columnHandles = Array.from({ length: map.width }, (_, column) => this.createHandle('column', column))
@@ -98,8 +110,8 @@ export class TableView implements NodeView {
       handle.append(dot)
     }
 
-    handle.addEventListener('pointerdown', event => this.startDrag(event, axis, index, handle))
-    handle.addEventListener('pointermove', event => this.trackDrag(event.clientX, event.clientY))
+    handle.addEventListener('pointerdown', (event) => this.startDrag(event, axis, index, handle))
+    handle.addEventListener('pointermove', (event) => this.trackDrag(event.clientX, event.clientY))
     handle.addEventListener('pointerup', () => this.dropItem())
     handle.addEventListener('pointercancel', () => this.finishDrag())
     return handle
@@ -136,48 +148,57 @@ export class TableView implements NodeView {
 
   private addColumn() {
     const position = this.getPos()
-    if (position == null)
-      return
+    if (position == null) return
     const map = TableMap.get(this.node)
-    const transaction = addTableColumn(this.view.state.tr, {
-      bottom: map.height,
-      left: 0,
-      map,
-      right: map.width,
-      table: this.node,
-      tableStart: position + 1,
-      top: 0,
-    }, map.width)
+    const transaction = addTableColumn(
+      this.view.state.tr,
+      {
+        bottom: map.height,
+        left: 0,
+        map,
+        right: map.width,
+        table: this.node,
+        tableStart: position + 1,
+        top: 0,
+      },
+      map.width,
+    )
     this.view.dispatch(transaction.scrollIntoView())
     this.view.focus()
   }
 
   private addRow() {
     const position = this.getPos()
-    if (position == null)
-      return
+    if (position == null) return
     const map = TableMap.get(this.node)
-    const transaction = addTableRow(this.view.state.tr, {
-      bottom: map.height,
-      left: 0,
-      map,
-      right: map.width,
-      table: this.node,
-      tableStart: position + 1,
-      top: 0,
-    }, map.height)
+    const transaction = addTableRow(
+      this.view.state.tr,
+      {
+        bottom: map.height,
+        left: 0,
+        map,
+        right: map.width,
+        table: this.node,
+        tableStart: position + 1,
+        top: 0,
+      },
+      map.height,
+    )
     this.view.dispatch(transaction.scrollIntoView())
     this.view.focus()
   }
 
   private selectItem(axis: 'column' | 'row', index: number) {
     const position = this.getPos()
-    if (position == null)
-      return
+    if (position == null) return
     const map = TableMap.get(this.node)
     const tableStart = position + 1
     const firstCell = map.positionAt(axis === 'column' ? 0 : index, axis === 'column' ? index : 0, this.node)
-    const lastCell = map.positionAt(axis === 'column' ? map.height - 1 : index, axis === 'column' ? index : map.width - 1, this.node)
+    const lastCell = map.positionAt(
+      axis === 'column' ? map.height - 1 : index,
+      axis === 'column' ? index : map.width - 1,
+      this.node,
+    )
     const selection = CellSelection[axis === 'column' ? 'colSelection' : 'rowSelection'](
       this.view.state.doc.resolve(tableStart + firstCell),
       this.view.state.doc.resolve(tableStart + lastCell),
@@ -186,8 +207,7 @@ export class TableView implements NodeView {
   }
 
   private startDrag(event: PointerEvent, axis: 'column' | 'row', index: number, handle: HTMLButtonElement) {
-    if (event.button !== 0)
-      return
+    if (event.button !== 0) return
     event.preventDefault()
     this.draggedAxis = axis
     this.draggedIndex = index
@@ -201,8 +221,10 @@ export class TableView implements NodeView {
 
   private moveItem(target: number) {
     const position = this.getPos()
-    if (position == null || this.draggedAxis == null || this.draggedIndex == null)
+    if (position == null || this.draggedAxis == null || this.draggedIndex == null) {
       return
+    }
+
     const axis = this.draggedAxis
     const source = this.draggedIndex
     if (source === target) {
@@ -224,8 +246,10 @@ export class TableView implements NodeView {
   }
 
   private finishDrag() {
-    if (this.dragHandle && this.pointerId != null && this.dragHandle.hasPointerCapture(this.pointerId))
+    if (this.dragHandle && this.pointerId != null && this.dragHandle.hasPointerCapture(this.pointerId)) {
       this.dragHandle.releasePointerCapture(this.pointerId)
+    }
+
     this.dom.classList.remove('dragging-column', 'dragging-row')
     this.draggedAxis = null
     this.draggedIndex = null
@@ -233,32 +257,29 @@ export class TableView implements NodeView {
     this.dragHandle = null
     this.pointerId = null
     this.hideDropTarget()
-    for (const handle of [...this.columnHandles, ...this.rowHandles])
-      handle.classList.remove('dragging')
+    for (const handle of [...this.columnHandles, ...this.rowHandles]) handle.classList.remove('dragging')
   }
 
   private trackDrag(clientX: number, clientY: number) {
-    if (this.draggedAxis == null)
-      return
+    if (this.draggedAxis == null) return
     this.targetIndex = this.draggedAxis === 'column' ? this.columnAt(clientX) : this.rowAt(clientY)
     this.showDropTarget(this.targetIndex)
   }
 
   private dropItem() {
-    if (this.draggedIndex == null || this.targetIndex == null)
-      return
+    if (this.draggedIndex == null || this.targetIndex == null) return
     this.moveItem(this.targetIndex)
   }
 
   private columnAt(clientX: number) {
     const cells = Array.from(this.contentDOM.rows[0]?.cells ?? [])
-    const column = cells.findIndex(cell => clientX < cell.getBoundingClientRect().right)
+    const column = cells.findIndex((cell) => clientX < cell.getBoundingClientRect().right)
     return column === -1 ? cells.length - 1 : column
   }
 
   private rowAt(clientY: number) {
     const rows = Array.from(this.contentDOM.rows)
-    const row = rows.findIndex(row => clientY < row.getBoundingClientRect().bottom)
+    const row = rows.findIndex((row) => clientY < row.getBoundingClientRect().bottom)
     return row === -1 ? rows.length - 1 : row
   }
 
@@ -267,16 +288,15 @@ export class TableView implements NodeView {
       this.hideDropTarget()
       return
     }
-    const item = this.draggedAxis === 'column'
-      ? this.contentDOM.rows[0]?.cells[index]
-      : this.contentDOM.rows[index]
+    const item = this.draggedAxis === 'column' ? this.contentDOM.rows[0]?.cells[index] : this.contentDOM.rows[index]
     if (!item) {
       this.hideDropTarget()
       return
     }
-    const boundary = this.draggedAxis === 'column'
-      ? item.offsetLeft + (this.draggedIndex < index ? item.offsetWidth : 0)
-      : item.offsetTop + (this.draggedIndex < index ? item.offsetHeight : 0)
+    const boundary =
+      this.draggedAxis === 'column'
+        ? item.offsetLeft + (this.draggedIndex < index ? item.offsetWidth : 0)
+        : item.offsetTop + (this.draggedIndex < index ? item.offsetHeight : 0)
     this.dropIndicator.className = `table-${this.draggedAxis}-drop-target`
     this.dropIndicator.hidden = false
     this.dropIndicator.style.height = this.draggedAxis === 'column' ? `${this.table.offsetHeight}px` : ''
