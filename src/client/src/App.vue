@@ -58,34 +58,36 @@ watch(online, (isOnline) => {
     </aside>
 
     <template v-if="notes.ready">
-      <article class="flex min-w-0 flex-1 flex-col relative" v-if="notes.selectedNote">
-        <header class="flex items-center justify-between m-1">
+      <article class="min-w-0 flex-1 relative" v-if="notes.selectedNote">
+        <header class="absolute top-0 left-0 right-0 flex items-center justify-between m-1 z-10">
           <div class="flex items-center gap-2">
-            <button class="p-2 hover:bg-stone-100 text-stone-700 rounded-lg" type="button" title="New note"
-              @click="notes.createNote">
+            <button class="p-2 bg-stone-100 backdrop-blur-lg hover:bg-stone-100 text-stone-700 rounded-lg" type="button"
+              title="New note" @click="notes.createNote">
               <PencilSquareIcon class="size-5" />
             </button>
             <button v-if="notes.selectedNote && !notes.selectedNote.deleted"
-              class="p-2 hover:bg-red-50 rounded-lg text-red-500" type="button" title="Delete note"
-              @click="notes.deleteSelected">
+              class="p-2 bg-red-100 backdrop-blur-lg hover:bg-red-50 rounded-lg text-red-500" type="button"
+              title="Delete note" @click="notes.deleteSelected">
               <TrashIcon class="size-5" />
             </button>
-            <button class="p-2 hover:bg-stone-100 text-stone-700 rounded-lg" type="button" title="Sync now"
-              :disabled="notes.syncing" @click="notes.sync">
+            <button class="p-2 bg-stone-100 backdrop-blur-lg hover:bg-stone-100 text-stone-700 rounded-lg" type="button"
+              title="Sync now" :disabled="notes.syncing" @click="notes.sync">
               <ArrowPathIcon class="size-5" />
             </button>
-            <button class="p-2 hover:bg-red-50 text-red-500 rounded-lg" type="button" title="Reset local data"
-              :disabled="notes.syncing" @click="resetLocalData">
+            <button class="p-2 bg-red-100 backdrop-blur-lg hover:bg-red-50 text-red-500 rounded-lg" type="button"
+              title="Reset local data" :disabled="notes.syncing" @click="resetLocalData">
               <div class="relative">
                 <TrashIcon class="size-5" />
-                <span class="size-2 rounded-full bg-red-500 absolute bottom-0 right-0">
+                <span class="size-2 rounded-full bg-red-400 absolute bottom-0 right-0">
                 </span>
               </div>
             </button>
           </div>
         </header>
-        <NoteEditor class="min-h-0 flex-1 overflow-auto" :model-value="notes.selectedNote.content"
-          @update:model-value="notes.updateSelected({ content: $event })" />
+        <div class="absolute inset-0 overflow-y-auto">
+          <NoteEditor class="min-h-0 flex-1 " :model-value="notes.selectedNote.content"
+            @update:model-value="notes.updateSelected({ content: $event })" />
+        </div>
         <footer
           class="flex items-center gap-3 absolute right-0 bottom-0 px-4 py-1 text-stone-700 text-sm bg-stone-100 rounded-tl-lg">
           <span class="">

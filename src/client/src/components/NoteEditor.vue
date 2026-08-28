@@ -195,7 +195,7 @@ function markdown() {
 
 onMounted(() => {
   view = new EditorView(editor.value!, {
-    attributes: { class: 'min-h-full p-4 outline-none' },
+    attributes: { class: 'min-h-full p-4 pt-8 outline-none' },
     nodeViews: {
       table: (node, view, getPos) => new TableView(node, view, getPos),
     },
