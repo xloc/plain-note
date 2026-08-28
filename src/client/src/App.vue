@@ -9,13 +9,37 @@ import {
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 import { useOnline } from '@vueuse/core'
-import { computed, onMounted, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import NoteEditor from './components/NoteEditor.vue'
 import { notePreview, noteTitle, useNotesStore } from './stores/notes'
 
 const notes = useNotesStore()
 const online = useOnline()
+const noteNav = ref<HTMLElement | null>(null)
 const sync = () => void notes.sync()
+const noteSections = computed(() => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const week = new Date(today)
+  week.setDate(today.getDate() - ((today.getDay() + 6) % 7))
+  const month = new Date(today.getFullYear(), today.getMonth(), 1)
+
+  return [
+    { label: 'Today', notes: notes.activeNotes.filter((note) => note.updatedAt >= today.getTime()) },
+    {
+      label: 'This week',
+      notes: notes.activeNotes.filter((note) => note.updatedAt >= week.getTime() && note.updatedAt < today.getTime()),
+    },
+    {
+      label: 'This month',
+      notes: notes.activeNotes.filter((note) => note.updatedAt >= month.getTime() && note.updatedAt < week.getTime()),
+    },
+    {
+      label: 'Older',
+      notes: notes.activeNotes.filter((note) => note.updatedAt < Math.min(month.getTime(), week.getTime())),
+    },
+  ].filter((section) => section.notes.length)
+})
 const wordCount = computed(
   () => notes.selectedNote?.content.match(/[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
 )
@@ -34,42 +58,54 @@ watch(online, (isOnline) => {
     sync()
   }
 })
+watch(
+  () => notes.selectedNote?.updatedAt,
+  async () => {
+    await nextTick()
+    noteNav.value?.querySelector<HTMLElement>('.bg-violet-100')?.scrollIntoView({ block: 'nearest' })
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>
   <main class="flex h-screen overflow-hidden">
     <aside class="flex w-64 shrink-0 flex-col bg-stone-100">
       <template v-if="notes.ready">
-        <nav class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <button
-            class="p-2 text-start hover:bg-violet-100"
-            v-for="note in notes.activeNotes"
-            :key="note.id"
-            type="button"
-            @click="notes.select(note.id)"
-          >
-            <!-- title -->
-            <div class="flex">
-              <div class="min-w-0 flex-1 truncate font-semibold text-stone-800">
-                {{ noteTitle(note.content) }}
+        <nav ref="noteNav" class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <section v-for="section in noteSections" :key="section.label">
+            <h2 class="bg-white px-2 text-sm">{{ section.label }}</h2>
+            <button
+              class="block w-full p-2 text-start hover:bg-violet-100"
+              :class="{ 'bg-violet-100': note.id === notes.selectedId }"
+              v-for="note in section.notes"
+              :key="note.id"
+              type="button"
+              @click="notes.select(note.id)"
+            >
+              <!-- title -->
+              <div class="flex">
+                <div class="min-w-0 flex-1 truncate font-semibold text-stone-800">
+                  {{ noteTitle(note.content) }}
+                </div>
+                <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
               </div>
-              <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
-            </div>
-            <!-- preview -->
-            <div class="line-clamp-1 h-5 text-sm leading-5 text-stone-800">
-              {{ notePreview(note.content) }}
-            </div>
-          </button>
+              <!-- preview -->
+              <div class="line-clamp-1 h-5 text-sm leading-5 text-stone-800">
+                {{ notePreview(note.content) }}
+              </div>
+            </button>
+          </section>
         </nav>
       </template>
     </aside>
 
     <template v-if="notes.ready">
       <article class="relative min-w-0 flex-1" v-if="notes.selectedNote">
-        <header class="absolute top-0 right-0 left-0 z-10 m-1 flex items-center justify-between">
+        <header class="absolute top-0 right-0 left-0 z-10 m-2 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <button
-              class="rounded-lg bg-stone-100 p-2 text-stone-700 backdrop-blur-lg hover:bg-stone-100"
+              class="rounded-lg bg-stone-100 p-2 text-stone-800 backdrop-blur-lg hover:bg-stone-100"
               type="button"
               title="New note"
               @click="notes.createNote"

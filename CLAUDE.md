@@ -21,5 +21,6 @@ Follow established best practices when they make the code or project simpler. Ig
 - **If unsure between two implementations**, pick the one with fewer moving parts and less duplication, even if it's less general.
 - **If adding a helper, encoding step, validation, or optimization doesn't remove more code than it adds, don't add it.**
 - **TypeScript types at declaration site.** Define types at function signatures, API boundaries, and state initialization. Let TypeScript infer derived values.
+- **No aria** Don’t add aria attributes for simplicity
 
 See [design/00-code-style-examples.md](design/00-code-style-examples.md) for examples.
