@@ -19,6 +19,15 @@ const online = useOnline()
 const noteNav = ref<HTMLElement | null>(null)
 const showNoteList = ref(true)
 const sync = () => void notes.sync()
+const formatUpdatedAt = (timestamp: number) => {
+  const date = new Date(timestamp)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  if (date.toDateString() === today.toDateString()) return 'Today'
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
 const createNote = () => {
   showNoteList.value = false
   void notes.createNote()
@@ -72,7 +81,7 @@ watch(
   () => notes.selectedNote?.updatedAt,
   async () => {
     await nextTick()
-    noteNav.value?.querySelector<HTMLElement>('.bg-violet-100')?.scrollIntoView({ block: 'nearest' })
+    noteNav.value?.querySelector<HTMLElement>('.md\\:bg-violet-100')?.scrollIntoView({ block: 'nearest' })
   },
   { flush: 'post' },
 )
@@ -90,8 +99,8 @@ watch(
             <h2 class="px-2 text-xl font-semibold md:text-base">{{ section.label }}</h2>
             <div class="overflow-hidden rounded-xl bg-white">
               <button
-                class="block w-full border-b border-stone-200 px-4 py-2 text-start last:border-b-0 hover:bg-violet-100"
-                :class="{ 'bg-violet-100': note.id === notes.selectedId }"
+                class="block w-full border-b border-stone-200 px-4 py-2 text-start last:border-b-0 md:hover:bg-violet-100"
+                :class="{ 'md:bg-violet-100': note.id === notes.selectedId }"
                 v-for="note in section.notes"
                 :key="note.id"
                 type="button"
@@ -105,8 +114,9 @@ watch(
                   <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
                 </div>
                 <!-- preview -->
-                <div class="line-clamp-1 h-5 text-sm leading-5 text-stone-800 md:text-xs">
-                  {{ notePreview(note.content) }}
+                <div class="flex gap-2 text-sm text-stone-500 md:text-xs">
+                  <span class="shrink-0">{{ formatUpdatedAt(note.updatedAt) }}</span>
+                  <span class="truncate">{{ notePreview(note.content) }}</span>
                 </div>
               </button>
             </div>

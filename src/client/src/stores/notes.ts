@@ -376,7 +376,9 @@ export function noteTitle(content: string) {
 
 export function notePreview(content: string) {
   const heading = noteHeading(content)
-  return (heading ? content.slice(heading[0].length) : content).replace(/\n+/g, ' ').trim().slice(0, 80)
+  const body = heading ? content.slice(heading[0].length) : content
+  const oneline = body.replace(/\n+/g, ' ').trim().slice(0, 80)
+  return oneline || 'Empty'
 }
 
 function noteHeading(content: string) {
