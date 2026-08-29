@@ -29,25 +29,10 @@ const codeIndentation = ' '.repeat(4)
 const editor = ref<HTMLElement | null>(null)
 let view: EditorView | undefined
 
-const paragraphEnter: Command = (state, dispatch) => {
-  const { $from, $to, empty } = state.selection
-  // if outside plain paragraphs, fall back to default
-  if (!$from.sameParent($to) || $from.parent.type !== paragraph || $from.node(-1).type === listItem) {
-    return false
-  }
-
-  const previous = empty ? $from.nodeBefore : null
-  if (previous?.type === hardBreak) {
-    // Second Enter: paragraph break
-    const breakPosition = $from.pos - previous.nodeSize
-    if (dispatch) {
-      dispatch(state.tr.delete(breakPosition, $from.pos).split(breakPosition).scrollIntoView())
-    }
-  } else if (dispatch) {
-    // First Enter: inline break
+const insertHardBreak: Command = (state, dispatch) => {
+  if (dispatch) {
     dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
   }
-
   return true
 }
 
@@ -177,7 +162,8 @@ function plugins() {
       'Mod-`': toggleMark(code),
       Backspace: deleteSelectedTablePart,
       Delete: deleteSelectedTablePart,
-      Enter: chainCommands(splitListItem(listItem), codeBlockEnter, paragraphEnter),
+      Enter: chainCommands(splitListItem(listItem), codeBlockEnter),
+      'Shift-Enter': chainCommands(codeBlockEnter, insertHardBreak),
       Tab: chainCommands(goToNextCell(1), sinkListItem(listItem), insertCodeIndentation, insertTab),
       'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(listItem), removeCodeIndentation, removeTab),
       'Mod-Alt-t': insertTable,
@@ -239,6 +225,8 @@ onBeforeUnmount(() => view?.destroy())
 </template>
 
 <style scoped>
+/* general */
+
 :deep(.ProseMirror) {
   tab-size: 4;
   white-space: break-spaces;
@@ -272,12 +260,7 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror ul),
 :deep(.ProseMirror ol),
 :deep(.ProseMirror pre) {
-  --pm-paragraph-gap: calc(2 * var(--spacing));
-  margin: 0 0 var(--pm-paragraph-gap);
-}
-
-:deep(.ProseMirror p) {
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 :deep(.ProseMirror li p) {
@@ -288,6 +271,47 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror li ol) {
   margin-block: 0;
 }
+
+:deep(.ProseMirror ul),
+:deep(.ProseMirror ol) {
+  padding-left: 1.5rem;
+}
+
+:deep(.ProseMirror ul) {
+  list-style: disc;
+}
+
+:deep(.ProseMirror ol) {
+  list-style: decimal;
+}
+
+:deep(.ProseMirror blockquote) {
+  border-left: 0.25rem solid currentColor;
+  margin: 0 0 1rem;
+  padding-left: 1rem;
+}
+
+:deep(.ProseMirror code) {
+  background-color: var(--color-stone-200);
+  border-radius: var(--spacing);
+  font-family: monospace;
+  padding: calc(0.5 * var(--spacing)) var(--spacing);
+}
+
+:deep(.ProseMirror pre code) {
+  border-radius: 0;
+  padding: 0;
+}
+
+:deep(.ProseMirror pre) {
+  background-color: var(--color-stone-200);
+  border-radius: var(--radius-lg);
+  line-height: 1.2;
+  overflow: auto;
+  padding: calc(3 * var(--spacing)) calc(4 * var(--spacing));
+}
+
+/* headings */
 
 :deep(.ProseMirror h1),
 :deep(.ProseMirror h2),
@@ -301,6 +325,7 @@ onBeforeUnmount(() => view?.destroy())
   line-height: 1.2;
   margin: calc(4 * var(--spacing)) 0;
   overflow: hidden;
+  font-size: 1.2rem;
 }
 
 :deep(.ProseMirror h1::after),
@@ -329,42 +354,20 @@ onBeforeUnmount(() => view?.destroy())
   font-weight: 400;
 }
 
-:deep(.ProseMirror h1::after) {
-  content: 'h1';
-}
+/* prettier-ignore */
+:deep(.ProseMirror h1::after) { content: 'h1'; }
+/* prettier-ignore */
+:deep(.ProseMirror h2::after) { content: 'h2'; }
+/* prettier-ignore */
+:deep(.ProseMirror h3::after) { content: 'h3'; }
+/* prettier-ignore */
+:deep(.ProseMirror h4::after) { content: 'h4'; }
+/* prettier-ignore */
+:deep(.ProseMirror h5::after) { content: 'h5'; }
+/* prettier-ignore */
+:deep(.ProseMirror h6::after) { content: 'h6'; }
 
-:deep(.ProseMirror h2::after) {
-  content: 'h2';
-}
-
-:deep(.ProseMirror h3::after) {
-  content: 'h3';
-}
-
-:deep(.ProseMirror h4::after) {
-  content: 'h4';
-}
-
-:deep(.ProseMirror h5::after) {
-  content: 'h5';
-}
-
-:deep(.ProseMirror h6::after) {
-  content: 'h6';
-}
-
-:deep(.ProseMirror ul),
-:deep(.ProseMirror ol) {
-  padding-left: 1.5rem;
-}
-
-:deep(.ProseMirror ul) {
-  list-style: disc;
-}
-
-:deep(.ProseMirror ol) {
-  list-style: decimal;
-}
+/* table */
 
 :deep(.ProseMirror .tableWrapper) {
   --table-control-size: 1.25rem;
@@ -517,31 +520,5 @@ onBeforeUnmount(() => view?.destroy())
   pointer-events: none;
   position: absolute;
   transform: translateY(-50%);
-}
-
-:deep(.ProseMirror blockquote) {
-  border-left: 0.25rem solid currentColor;
-  margin: 0 0 1rem;
-  padding-left: 1rem;
-}
-
-:deep(.ProseMirror code) {
-  background-color: var(--color-stone-200);
-  border-radius: var(--spacing);
-  font-family: monospace;
-  padding: calc(0.5 * var(--spacing)) var(--spacing);
-}
-
-:deep(.ProseMirror pre code) {
-  border-radius: 0;
-  padding: 0;
-}
-
-:deep(.ProseMirror pre) {
-  background-color: var(--color-stone-200);
-  border-radius: var(--radius-lg);
-  line-height: 1.2;
-  overflow: auto;
-  padding: calc(3 * var(--spacing)) calc(4 * var(--spacing));
 }
 </style>

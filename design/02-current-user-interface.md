@@ -19,7 +19,7 @@ Edit Markdown as a rich document, while retaining Markdown as the stored format.
 
 The main interaction choices are:
 
-- Single Enter creates a line break; a second consecutive Enter creates a paragraph.
+- Enter creates a paragraph; Shift+Enter creates a line break.
 - Tab remains inside the editor: it navigates tables, indents lists, inserts four spaces in code blocks, and inserts a literal tab in normal text.
 - Heading levels are visible through a small `h1`–`h6` label and a suffix line after the heading’s final visual line.
 - Code is visually distinct but remains editable Markdown content.
