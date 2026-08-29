@@ -20,6 +20,8 @@ Edit Markdown as a rich document, while retaining Markdown as the stored format.
 The main interaction choices are:
 
 - Enter creates a paragraph; Shift+Enter creates a line break.
+- Markdown links render as links, and bare HTTP URLs become clickable without changing their stored text. Preview mode makes the note read-only and opens links with a click or tap; Cmd/Ctrl-click opens them while editing.
+- The visible screen, edit/preview mode, and last open note are remembered locally so reopening the app resumes the same context.
 - Tab remains inside the editor: it navigates tables, indents lists, inserts four spaces in code blocks, and inserts a literal tab in normal text.
 - Heading levels are visible through a small `h1`–`h6` label and a suffix line after the heading’s final visual line.
 - Code is visually distinct but remains editable Markdown content.

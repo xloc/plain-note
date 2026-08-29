@@ -1,3 +1,4 @@
+import { useStorage } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { v4 as randomUUID } from 'uuid'
 import { computed, ref, toRaw } from 'vue'
@@ -16,7 +17,7 @@ import { mergeMarkdown } from '../editor/merge'
 
 export const useNotesStore = defineStore('notes', () => {
   const notes = ref<LocalNote[]>([])
-  const selectedId = ref<string | null>(null)
+  const selectedId = useStorage<string | null>('plain-note:selected-note-id', null)
   const ready = ref(false)
   const syncing = ref(false)
   const syncMessage = ref('Local only')
@@ -33,7 +34,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function initialize() {
     notes.value = await loadNotes()
-    selectedId.value = activeNotes.value[0]?.id ?? null
+    if (!selectedNote.value) selectedId.value = activeNotes.value[0]?.id ?? null
     ready.value = true
     if (!selectedId.value && navigator.onLine) {
       await sync()

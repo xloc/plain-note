@@ -8,6 +8,15 @@ import { Schema } from 'prosemirror-model'
 import { tableNodes } from 'prosemirror-tables'
 
 export const tabCharacter = '\t'
+const bareUrlPattern = /https?:\/\/[^\s<>()\[\]{}]*[^\s<>()\[\]{},.!?;:'"]/g
+
+export function bareUrls(text: string) {
+  return Array.from(text.matchAll(bareUrlPattern), (match) => ({
+    from: match.index,
+    to: match.index + match[0].length,
+    href: match[0],
+  }))
+}
 
 export const schema = new Schema({
   nodes: defaultMarkdownParser.schema.spec.nodes.append(

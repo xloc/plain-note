@@ -9,10 +9,11 @@ import { type Command, EditorState, NodeSelection, TextSelection } from 'prosemi
 import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tableEditing } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { autoLinks } from '../editor/autoLinks'
 import { markdownParser, markdownSerializer, schema, tabCharacter } from '../editor/markdown'
 import { TableView } from '../editor/TableView'
 
-const props = defineProps<{ modelValue: string }>()
+const props = withDefaults(defineProps<{ modelValue: string; editable?: boolean }>(), { editable: true })
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
 const {
   bullet_list: bulletList,
@@ -23,7 +24,7 @@ const {
   ordered_list: orderedList,
   paragraph,
 } = schema.nodes
-const { code } = schema.marks
+const { code, link } = schema.marks
 const codeIndentation = ' '.repeat(4)
 
 const editor = ref<HTMLElement | null>(null)
@@ -138,6 +139,14 @@ function plugins() {
             .removeStoredMark(code)
             .scrollIntoView()
         }),
+        new InputRule(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/, (state, match, start, end) => {
+          const linkedText = schema.text(match[1], [link.create({ href: match[2] })])
+          const transaction = state.tr.replaceWith(start, end, linkedText)
+          return transaction
+            .setSelection(TextSelection.create(transaction.doc, start + linkedText.nodeSize))
+            .removeStoredMark(link)
+            .scrollIntoView()
+        }),
         textblockTypeInputRule(/^```$/, codeBlock),
         new InputRule(/^(?:---|___|\*\*\*)$/, (state, _match, start, end) => {
           const transaction = state.tr.replaceWith(start - 1, end, horizontalRule.create())
@@ -176,6 +185,7 @@ function plugins() {
       'Mod-Alt-6': setBlockType(schema.nodes.heading, { level: 6 }),
     }),
     keymap(baseKeymap),
+    autoLinks,
     tableEditing(),
     gapCursor(),
   ]
@@ -188,6 +198,7 @@ function markdown() {
 onMounted(() => {
   view = new EditorView(editor.value!, {
     attributes: { class: 'min-h-full px-4 py-2 md:pt-14 outline-none' },
+    editable: () => props.editable,
     nodeViews: {
       table: (node, view, getPos) => new TableView(node, view, getPos),
     },
@@ -216,6 +227,13 @@ watch(
     )
   },
 )
+watch(
+  () => props.editable,
+  (editable) => {
+    view?.setProps({ editable: () => editable })
+    if (!editable) view?.dom.blur()
+  },
+)
 
 onBeforeUnmount(() => view?.destroy())
 </script>
@@ -230,6 +248,11 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror) {
   tab-size: 4;
   white-space: break-spaces;
+}
+
+:deep(.ProseMirror a) {
+  color: var(--color-violet-500);
+  text-decoration: revert;
 }
 
 :deep(.ProseMirror-hideselection) {
@@ -402,6 +425,10 @@ onBeforeUnmount(() => view?.destroy())
   pointer-events: none;
   position: absolute;
   z-index: 1;
+}
+
+:deep(.ProseMirror[contenteditable='false'] .table-controls) {
+  display: none;
 }
 
 :deep(.ProseMirror .table-control) {

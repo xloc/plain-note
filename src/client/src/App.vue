@@ -9,8 +9,9 @@ import {
   SignalSlashIcon,
 } from '@heroicons/vue/24/outline'
 import { IconDatabaseX, IconTrash } from '@tabler/icons-vue'
-import { useOnline, useSwipe } from '@vueuse/core'
+import { useOnline, useStorage, useSwipe } from '@vueuse/core'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import EditorModeToggle from './components/EditorModeToggle.vue'
 import IconTextPopupMenu from './components/IconTextPopupMenu.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import { notePreview, noteTitle, useNotesStore } from './stores/notes'
@@ -19,7 +20,8 @@ const notes = useNotesStore()
 const online = useOnline()
 const noteNav = ref<HTMLElement | null>(null)
 const editorScreen = ref<HTMLElement | null>(null)
-const showNoteList = ref(true)
+const showNoteList = useStorage('plain-note:show-note-list', !notes.selectedId)
+const previewMode = useStorage('plain-note:preview-mode', false)
 let swipeFromEdge = false
 const sync = () => void notes.sync()
 const formatUpdatedAt = (timestamp: number) => {
@@ -33,6 +35,7 @@ const formatUpdatedAt = (timestamp: number) => {
 }
 const createNote = () => {
   showNoteList.value = false
+  previewMode.value = false
   void notes.createNote()
 }
 const openNote = (id: string) => {
@@ -188,11 +191,15 @@ watch(
               <ArrowPathIcon class="size-5" />
             </button>
           </div>
-          <IconTextPopupMenu :items="noteMenuItems" />
+          <div class="flex items-center gap-2">
+            <EditorModeToggle v-model="previewMode" />
+            <IconTextPopupMenu :items="noteMenuItems" />
+          </div>
         </header>
         <div class="min-h-0 flex-1 overflow-y-auto md:absolute md:inset-0">
           <NoteEditor
             class="min-h-0 flex-1"
+            :editable="!previewMode"
             :model-value="notes.selectedNote.content"
             @update:model-value="notes.updateSelected({ content: $event })"
           />
