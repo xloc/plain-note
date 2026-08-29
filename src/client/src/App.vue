@@ -7,10 +7,11 @@ import {
   ExclamationCircleIcon,
   PencilSquareIcon,
   SignalSlashIcon,
-  TrashIcon,
 } from '@heroicons/vue/24/outline'
+import { IconDatabaseX, IconTrash } from '@tabler/icons-vue'
 import { useOnline, useSwipe } from '@vueuse/core'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import IconTextPopupMenu from './components/IconTextPopupMenu.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import { notePreview, noteTitle, useNotesStore } from './stores/notes'
 
@@ -81,6 +82,15 @@ const resetLocalData = () => {
     void notes.resetLocalData()
   }
 }
+const noteMenuItems = computed(() => [
+  { icon: IconTrash, label: 'Delete note', action: () => void notes.deleteSelected() },
+  {
+    icon: IconDatabaseX,
+    label: 'Reset local data',
+    action: resetLocalData,
+    disabled: notes.syncing,
+  },
+])
 
 onMounted(() => {
   void notes.initialize()
@@ -169,15 +179,6 @@ watch(
               <PencilSquareIcon class="size-5" />
             </button>
             <button
-              v-if="notes.selectedNote && !notes.selectedNote.deleted"
-              class="rounded-lg bg-red-100 p-2 text-red-500 hover:bg-red-50"
-              type="button"
-              title="Delete note"
-              @click="notes.deleteSelected"
-            >
-              <TrashIcon class="size-5" />
-            </button>
-            <button
               class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-100"
               type="button"
               title="Sync now"
@@ -186,19 +187,8 @@ watch(
             >
               <ArrowPathIcon class="size-5" />
             </button>
-            <button
-              class="rounded-lg bg-red-100 p-2 text-red-500 hover:bg-red-50"
-              type="button"
-              title="Reset local data"
-              :disabled="notes.syncing"
-              @click="resetLocalData"
-            >
-              <div class="relative">
-                <TrashIcon class="size-5" />
-                <span class="absolute right-0 bottom-0 size-2 rounded-full bg-red-400"> </span>
-              </div>
-            </button>
           </div>
+          <IconTextPopupMenu :items="noteMenuItems" />
         </header>
         <div class="min-h-0 flex-1 overflow-y-auto md:absolute md:inset-0">
           <NoteEditor

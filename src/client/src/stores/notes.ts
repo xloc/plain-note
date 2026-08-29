@@ -79,7 +79,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function deleteSelected() {
     const note = selectedNote.value
-    if (!note) return
+    if (!note || note.deleted) return
     if (note.base === null) {
       notes.value = notes.value.filter((candidate) => candidate.id !== note.id)
       await removeNote(note.id)
