@@ -8,20 +8,30 @@ import {
   PencilSquareIcon,
   SignalSlashIcon,
 } from '@heroicons/vue/24/outline'
-import { IconDatabaseX, IconTrash } from '@tabler/icons-vue'
-import { useOnline, useStorage, useSwipe } from '@vueuse/core'
+import { IconDatabaseX, IconEye, IconFileTypeHtml, IconMarkdown, IconTrash } from '@tabler/icons-vue'
+import { useDropZone, useOnline, useStorage, useSwipe } from '@vueuse/core'
+import type { Component } from 'vue'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import EditorModeToggle from './components/EditorModeToggle.vue'
 import IconTextPopupMenu from './components/IconTextPopupMenu.vue'
 import NoteEditor from './components/NoteEditor.vue'
+import {
+  exportHtml,
+  exportMarkdown,
+  exportMarkdownWithMetadata,
+  parseMarkdownImport,
+  renderHtml,
+} from './editor/exportNote'
 import { notePreview, noteTitle, useNotesStore } from './stores/notes'
 
 const notes = useNotesStore()
 const online = useOnline()
+const noteList = ref<HTMLElement | null>(null)
 const noteNav = ref<HTMLElement | null>(null)
 const editorScreen = ref<HTMLElement | null>(null)
 const showNoteList = useStorage('plain-note:show-note-list', !notes.selectedId)
 const previewMode = useStorage('plain-note:preview-mode', false)
+const htmlExportPreview = ref(false)
 let swipeFromEdge = false
 const sync = () => void notes.sync()
 const formatUpdatedAt = (timestamp: number) => {
@@ -42,6 +52,17 @@ const openNote = (id: string) => {
   notes.select(id)
   showNoteList.value = false
 }
+const importMarkdownFile = async (file: File) => {
+  await notes.importNote(parseMarkdownImport(await file.text()))
+  showNoteList.value = false
+  previewMode.value = false
+}
+const { isOverDropZone } = useDropZone(noteList, {
+  onDrop(files) {
+    const file = files?.find((candidate) => candidate.type === 'text/markdown' || /\.(md|markdown)$/i.test(candidate.name))
+    if (file) void importMarkdownFile(file)
+  },
+})
 useSwipe(editorScreen, {
   threshold: 80,
   onSwipeStart: (event) => {
@@ -80,18 +101,52 @@ const wordCount = computed(
   () => notes.selectedNote?.content.match(/[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
 )
 const characterCount = computed(() => [...(notes.selectedNote?.content ?? '')].length)
+const htmlExportPreviewSource = computed(() => {
+  const note = notes.selectedNote
+  return note ? renderHtml(note.content, noteTitle(note.content)) : ''
+})
 const resetLocalData = () => {
   if (window.confirm('Delete all local notes and reload them from the server? Unsynced changes will be lost.')) {
     void notes.resetLocalData()
   }
 }
-const noteMenuItems = computed(() => [
-  { icon: IconTrash, label: 'Delete note', action: () => void notes.deleteSelected() },
+const exportSelectedMarkdown = (): void => {
+  const note = notes.selectedNote
+  if (note) exportMarkdown(note.content, noteTitle(note.content))
+}
+const exportSelectedMarkdownWithMetadata = (): void => {
+  const note = notes.selectedNote
+  if (note) exportMarkdownWithMetadata(note, noteTitle(note.content))
+}
+const exportSelectedHtml = (): void => {
+  const note = notes.selectedNote
+  if (note) exportHtml(note.content, noteTitle(note.content))
+}
+const toggleHtmlExportPreview = (): void => {
+  htmlExportPreview.value = !htmlExportPreview.value
+}
+const noteMenuItems = computed<
+  { icon: Component; label: string; action: () => void; disabled?: boolean; destructive?: boolean }[]
+>(() => [
+  { icon: IconMarkdown, label: 'Export Markdown', action: exportSelectedMarkdown },
+  {
+    icon: IconMarkdown,
+    label: 'Export Markdown with metadata',
+    action: exportSelectedMarkdownWithMetadata,
+  },
+  { icon: IconFileTypeHtml, label: 'Export HTML', action: exportSelectedHtml },
+  {
+    icon: IconEye,
+    label: htmlExportPreview.value ? 'Hide HTML preview' : 'Preview exported HTML',
+    action: toggleHtmlExportPreview,
+  },
+  { icon: IconTrash, label: 'Delete note', action: () => void notes.deleteSelected(), destructive: true },
   {
     icon: IconDatabaseX,
     label: 'Reset local data',
     action: resetLocalData,
     disabled: notes.syncing,
+    destructive: true,
   },
 ])
 
@@ -115,7 +170,17 @@ watch(
 
 <template>
   <main class="safe-area flex h-dvh overflow-hidden">
-    <aside class="w-full shrink-0 flex-col bg-stone-100 md:flex md:w-64" :class="showNoteList ? 'flex' : 'hidden'">
+    <aside
+      ref="noteList"
+      class="relative w-full shrink-0 flex-col bg-stone-100 md:flex md:w-64"
+      :class="showNoteList ? 'flex' : 'hidden'"
+    >
+      <div
+        v-if="isOverDropZone"
+        class="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-xl border-2 border-dashed border-violet-500 bg-violet-100 text-violet-500"
+      >
+        Drop Markdown to import
+      </div>
       <template v-if="notes.ready">
         <header class="shrink-0 px-4 pt-4 pb-2 md:hidden">
           <h1 class="text-4xl font-bold">Notes</h1>
@@ -196,13 +261,21 @@ watch(
             <IconTextPopupMenu :items="noteMenuItems" />
           </div>
         </header>
-        <NoteEditor
-          class="min-h-0 flex-1 overflow-y-auto md:absolute md:inset-0"
-          :document-id="notes.selectedNote.id"
-          :editable="!previewMode"
-          :model-value="notes.selectedNote.content"
-          @update:model-value="notes.updateSelected({ content: $event })"
-        />
+        <div class="min-h-0 flex-1 md:absolute md:inset-0" :class="{ 'grid grid-rows-2': htmlExportPreview }">
+          <NoteEditor
+            class="h-full min-h-0 min-w-0 overflow-y-auto"
+            :document-id="notes.selectedNote.id"
+            :editable="!previewMode"
+            :model-value="notes.selectedNote.content"
+            @update:model-value="notes.updateSelected({ content: $event })"
+          />
+          <iframe
+            v-if="htmlExportPreview"
+            class="h-full min-h-0 w-full border-t-2 border-stone-200"
+            title="HTML export preview"
+            :srcdoc="htmlExportPreviewSource"
+          />
+        </div>
         <footer
           class="flex shrink-0 items-center gap-3 self-end rounded-tl-lg bg-stone-100 px-4 py-1 text-sm text-stone-700 md:absolute md:right-0 md:bottom-0"
         >

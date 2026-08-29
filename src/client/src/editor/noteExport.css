@@ -1,0 +1,142 @@
+/*
+ * Styles embedded in standalone HTML note exports.
+ * Do not update this file during other feature work; synchronize it with the editor CSS in dedicated batches when requested by the user.
+ */
+
+:root {
+  color: #292524;
+  font-family:
+    ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+.note-content {
+  overflow-wrap: anywhere;
+  padding: 0.5rem 1rem;
+  tab-size: 4;
+}
+
+.note-content a {
+  color: #8b5cf6;
+  text-decoration: underline;
+}
+
+.note-content p,
+.note-content ul,
+.note-content ol,
+.note-content pre {
+  line-height: 1.4;
+  margin-block: 0;
+}
+
+.note-content li p,
+.note-content li ul,
+.note-content li ol {
+  margin-block: 0;
+}
+
+.note-content ul,
+.note-content ol {
+  padding-left: 1.5rem;
+}
+
+.note-content ul {
+  list-style: disc;
+}
+
+.note-content ol {
+  list-style: decimal;
+}
+
+.note-content blockquote {
+  border-left: 0.25rem solid currentColor;
+  margin: 0 0 1rem;
+  padding-left: 1rem;
+}
+
+.note-content code {
+  background-color: #e7e5e4;
+  border-radius: 0.25rem;
+  font-family: monospace;
+  padding: 0.125rem 0.25rem;
+}
+
+.note-content pre {
+  background-color: #e7e5e4;
+  border-radius: 0.5rem;
+  line-height: 1.2;
+  overflow: auto;
+  padding: 0.75rem 1rem;
+}
+
+.note-content pre code {
+  border-radius: 0;
+  padding: 0;
+}
+
+.note-content h1,
+.note-content h2,
+.note-content h3,
+.note-content h4,
+.note-content h5,
+.note-content h6 {
+  --heading-label-line-gap: 0.5rem;
+
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 1rem 0;
+  overflow: hidden;
+}
+
+.note-content h1::after,
+.note-content h2::after,
+.note-content h3::after,
+.note-content h4::after,
+.note-content h5::after,
+.note-content h6::after {
+  background: linear-gradient(currentColor, currentColor) calc(1rem + var(--heading-label-line-gap)) center /
+    calc(100% - 1rem - var(--heading-label-line-gap)) 1px no-repeat;
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 400;
+  margin-left: 0.5rem;
+  margin-right: -100%;
+  opacity: 0.5;
+  vertical-align: middle;
+  width: 100%;
+}
+
+.note-content h1::after { content: 'h1'; }
+.note-content h2::after { content: 'h2'; }
+.note-content h3::after { content: 'h3'; }
+.note-content h4::after { content: 'h4'; }
+.note-content h5::after { content: 'h5'; }
+.note-content h6::after { content: 'h6'; }
+
+.note-content table {
+  --table-border-color: color-mix(in srgb, currentColor 25%, transparent);
+
+  border-collapse: separate;
+  border-left: 1px solid var(--table-border-color);
+  border-spacing: 0;
+  border-top: 1px solid var(--table-border-color);
+}
+
+.note-content tr {
+  height: 1.4em;
+}
+
+.note-content th,
+.note-content td {
+  border-bottom: 1px solid var(--table-border-color);
+  border-right: 1px solid var(--table-border-color);
+  min-width: 3rem;
+  padding-inline: 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.note-content img {
+  height: auto;
+  max-width: 100%;
+}

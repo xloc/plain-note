@@ -66,6 +66,25 @@ export const useNotesStore = defineStore('notes', () => {
     scheduleSync()
   }
 
+  async function importNote(imported: Pick<Note, 'content' | 'tags' | 'resources' | 'createdAt' | 'updatedAt'>) {
+    const note: LocalNote = {
+      id: randomUUID(),
+      content: imported.content,
+      tags: [...imported.tags],
+      resources: imported.resources.map((resource) => ({ ...resource })),
+      createdAt: imported.createdAt,
+      updatedAt: imported.updatedAt,
+      revision: randomUUID(),
+      base: null,
+      deleted: false,
+      syncState: 'pending',
+    }
+    notes.value.push(note)
+    selectedId.value = note.id
+    await saveNote(note)
+    scheduleSync()
+  }
+
   function updateSelected(update: { content: string }) {
     const note = selectedNote.value
     if (!note) return
@@ -325,6 +344,7 @@ export const useNotesStore = defineStore('notes', () => {
     selectedNote,
     initialize,
     createNote,
+    importNote,
     updateSelected,
     deleteSelected,
     select,

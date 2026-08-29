@@ -10,15 +10,20 @@ defineProps<{
     label: string
     action: () => void
     disabled?: boolean
+    destructive?: boolean
   }[]
 }>()
 
 const menu = ref<HTMLElement | null>(null)
 const open = ref(false)
 
-onClickOutside(menu, () => {
-  open.value = false
-})
+onClickOutside(
+  menu,
+  () => {
+    open.value = false
+  },
+  { detectIframe: true },
+)
 </script>
 
 <template>
@@ -39,7 +44,8 @@ onClickOutside(menu, () => {
       <button
         v-for="item in items"
         :key="item.label"
-        class="flex w-full items-center gap-2 border-b border-stone-200 px-3 py-2 text-sm whitespace-nowrap text-red-500 last:border-b-0 hover:bg-red-50 disabled:opacity-50"
+        class="flex w-full items-center gap-2 border-b border-stone-200 px-3 py-2 text-sm whitespace-nowrap last:border-b-0 disabled:opacity-50"
+        :class="item.destructive ? 'text-red-500 hover:bg-red-50' : 'text-stone-700 hover:bg-stone-50'"
         type="button"
         :disabled="item.disabled"
         @click="item.action"
