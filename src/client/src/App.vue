@@ -196,14 +196,13 @@ watch(
             <IconTextPopupMenu :items="noteMenuItems" />
           </div>
         </header>
-        <div class="min-h-0 flex-1 overflow-y-auto md:absolute md:inset-0">
-          <NoteEditor
-            class="min-h-0 flex-1"
-            :editable="!previewMode"
-            :model-value="notes.selectedNote.content"
-            @update:model-value="notes.updateSelected({ content: $event })"
-          />
-        </div>
+        <NoteEditor
+          class="min-h-0 flex-1 overflow-y-auto md:absolute md:inset-0"
+          :document-id="notes.selectedNote.id"
+          :editable="!previewMode"
+          :model-value="notes.selectedNote.content"
+          @update:model-value="notes.updateSelected({ content: $event })"
+        />
         <footer
           class="flex shrink-0 items-center gap-3 self-end rounded-tl-lg bg-stone-100 px-4 py-1 text-sm text-stone-700 md:absolute md:right-0 md:bottom-0"
         >

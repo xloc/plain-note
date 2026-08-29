@@ -22,6 +22,8 @@ The main interaction choices are:
 - Enter creates a paragraph; Shift+Enter creates a line break.
 - Markdown links render as links, and bare HTTP URLs become clickable without changing their stored text. Preview mode makes the note read-only and opens links with a click or tap; Cmd/Ctrl-click opens them while editing.
 - The visible screen, edit/preview mode, and last open note are remembered locally so reopening the app resumes the same context.
+- Scroll positions for the five most recently viewed notes are remembered locally for five minutes.
+- The editor header stays fixed while document content scrolls beneath it. Trailing viewport space allows the whole document to scroll above the viewport, and clicking that space places the cursor at the document end.
 - Tab remains inside the editor: it navigates tables, indents lists, inserts four spaces in code blocks, and inserts a literal tab in normal text.
 - Heading levels are visible through a small `h1`–`h6` label and a suffix line after the heading’s final visual line.
 - Code is visually distinct but remains editable Markdown content.

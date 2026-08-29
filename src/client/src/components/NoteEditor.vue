@@ -1,19 +1,23 @@
 <script setup lang="ts">
+import { useEventListener } from '@vueuse/core'
 import { baseKeymap, chainCommands, setBlockType, toggleMark } from 'prosemirror-commands'
 import { gapCursor } from 'prosemirror-gapcursor'
 import { history, redo, undo } from 'prosemirror-history'
 import { InputRule, inputRules, textblockTypeInputRule, wrappingInputRule } from 'prosemirror-inputrules'
 import { keymap } from 'prosemirror-keymap'
 import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list'
-import { type Command, EditorState, NodeSelection, TextSelection } from 'prosemirror-state'
+import { type Command, EditorState, NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tableEditing } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { autoLinks } from '../editor/autoLinks'
 import { markdownParser, markdownSerializer, schema, tabCharacter } from '../editor/markdown'
+import { RecentScrollPositions } from '../editor/RecentScrollPositions'
 import { TableView } from '../editor/TableView'
 
-const props = withDefaults(defineProps<{ modelValue: string; editable?: boolean }>(), { editable: true })
+const props = withDefaults(defineProps<{ documentId: string; modelValue: string; editable?: boolean }>(), {
+  editable: true,
+})
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
 const {
   bullet_list: bulletList,
@@ -26,9 +30,20 @@ const {
 } = schema.nodes
 const { code, link } = schema.marks
 const codeIndentation = ' '.repeat(4)
+const scrollPositions = new RecentScrollPositions()
 
 const editor = ref<HTMLElement | null>(null)
 let view: EditorView | undefined
+
+function saveScrollPosition() {
+  if (!editor.value) return
+  scrollPositions.save(props.documentId, editor.value.scrollTop)
+}
+
+function restoreScrollPosition(documentId: string) {
+  if (!editor.value) return
+  editor.value.scrollTop = scrollPositions.restore(documentId)
+}
 
 const insertHardBreak: Command = (state, dispatch) => {
   if (dispatch) {
@@ -195,9 +210,17 @@ function markdown() {
   return view ? markdownSerializer.serialize(view.state.doc) : ''
 }
 
+function focusEnd(event: MouseEvent) {
+  if (!props.editable || !view || (event.target !== view.dom && event.target !== event.currentTarget)) return
+  const lastBlock = view.dom.lastElementChild
+  if (lastBlock && event.clientY <= lastBlock.getBoundingClientRect().bottom) return
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)).scrollIntoView())
+  view.focus()
+}
+
 onMounted(() => {
   view = new EditorView(editor.value!, {
-    attributes: { class: 'min-h-full px-4 py-2 md:pt-14 outline-none' },
+    attributes: { class: 'px-4 py-2 md:pt-[var(--editor-header-space)] outline-none' },
     editable: () => props.editable,
     nodeViews: {
       table: (node, view, getPos) => new TableView(node, view, getPos),
@@ -213,6 +236,7 @@ onMounted(() => {
       }
     },
   })
+  restoreScrollPosition(props.documentId)
 })
 
 watch(
@@ -234,16 +258,52 @@ watch(
     if (!editable) view?.dom.blur()
   },
 )
+watch(
+  () => props.documentId,
+  async (documentId) => {
+    scrollPositions.flush()
+    await nextTick()
+    restoreScrollPosition(documentId)
+  },
+)
 
-onBeforeUnmount(() => view?.destroy())
+useEventListener(document, 'visibilitychange', () => {
+  if (document.visibilityState === 'hidden') scrollPositions.flush()
+})
+
+onBeforeUnmount(() => {
+  scrollPositions.flush()
+  view?.destroy()
+})
 </script>
 
 <template>
-  <div ref="editor" />
+  <div ref="editor" class="editor-scroll" @click="focusEnd" @scroll.passive="saveScrollPosition" />
 </template>
 
 <style scoped>
-/* general */
+/* Section: Note content padding */
+
+.editor-scroll {
+  --editor-header-space: 0px;
+  --editor-line-height: 1.4;
+}
+
+@media (min-width: 48rem) {
+  .editor-scroll {
+    --editor-header-space: calc(14 * var(--spacing));
+  }
+}
+
+/* Let the final line scroll below the header. */
+.editor-scroll::after {
+  content: '';
+  display: block;
+  height: calc(100% - var(--editor-header-space) - 1lh);
+  line-height: var(--editor-line-height);
+}
+
+/* Section: General */
 
 :deep(.ProseMirror) {
   tab-size: 4;
@@ -283,7 +343,7 @@ onBeforeUnmount(() => view?.destroy())
 :deep(.ProseMirror ul),
 :deep(.ProseMirror ol),
 :deep(.ProseMirror pre) {
-  line-height: 1.4;
+  line-height: var(--editor-line-height);
 }
 
 :deep(.ProseMirror li p) {
@@ -334,7 +394,7 @@ onBeforeUnmount(() => view?.destroy())
   padding: calc(3 * var(--spacing)) calc(4 * var(--spacing));
 }
 
-/* headings */
+/* Section: Headings */
 
 :deep(.ProseMirror h1),
 :deep(.ProseMirror h2),
@@ -390,7 +450,7 @@ onBeforeUnmount(() => view?.destroy())
 /* prettier-ignore */
 :deep(.ProseMirror h6::after) { content: 'h6'; }
 
-/* table */
+/* Section: Tables */
 
 :deep(.ProseMirror .tableWrapper) {
   --table-control-size: 1.25rem;
