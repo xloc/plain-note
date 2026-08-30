@@ -9,64 +9,40 @@ import {
   SignalSlashIcon,
 } from '@heroicons/vue/24/outline'
 import { IconDatabaseX, IconEye, IconFileTypeHtml, IconMarkdown, IconTrash } from '@tabler/icons-vue'
-import { useDropZone, useOnline, useStorage, useSwipe } from '@vueuse/core'
+import { useOnline, useStorage, useSwipe } from '@vueuse/core'
 import type { Component } from 'vue'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import EditorModeToggle from './components/EditorModeToggle.vue'
 import IconTextPopupMenu from './components/IconTextPopupMenu.vue'
 import NoteEditor from './components/NoteEditor.vue'
-import {
-  exportHtml,
-  exportMarkdown,
-  exportMarkdownWithMetadata,
-  parseMarkdownImport,
-  renderHtml,
-} from './editor/exportNote'
-import { notePreview, noteTitle, useNotesStore } from './stores/notes'
+import NoteList from './components/NoteList.vue'
+import { exportHtml, exportMarkdown, exportMarkdownWithMetadata, renderHtml } from './editor/exportNote'
+import { noteTitle } from './notePresentation'
+import { useNoteRoute } from './noteRoute'
+import { useNotesStore } from './stores/notes'
 
 const notes = useNotesStore()
+const { openNote: openNoteRoute } = useNoteRoute(notes)
 const online = useOnline()
-const noteList = ref<HTMLElement | null>(null)
-const noteNav = ref<HTMLElement | null>(null)
 const editorScreen = ref<HTMLElement | null>(null)
 const showNoteList = useStorage('plain-note:show-note-list', !notes.selectedId)
 const previewMode = useStorage('plain-note:preview-mode', false)
 const htmlExportPreview = ref(false)
 let swipeFromEdge = false
 const sync = () => void notes.sync()
-const formatUpdatedAt = (timestamp: number) => {
-  const date = new Date(timestamp)
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-  }
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
 const createNote = () => {
   showNoteList.value = false
   previewMode.value = false
   void notes.createNote()
 }
 const openNote = (id: string) => {
-  notes.select(id)
   showNoteList.value = false
+  void openNoteRoute(id)
 }
-const importMarkdownFile = async (file: File) => {
-  await notes.importNote(parseMarkdownImport(await file.text()))
+const showImportedNote = () => {
   showNoteList.value = false
   previewMode.value = false
 }
-const { isOverDropZone } = useDropZone(noteList, {
-  onDrop(files) {
-    const file = files?.find(
-      (candidate) => candidate.type === 'text/markdown' || /\.(md|markdown)$/i.test(candidate.name),
-    )
-    if (file) void importMarkdownFile(file)
-  },
-})
 useSwipe(editorScreen, {
   threshold: 80,
   onSwipeStart: (event) => {
@@ -80,29 +56,6 @@ useSwipe(editorScreen, {
     if (event.type === 'touchend' && swipeFromEdge && direction === 'right') showNoteList.value = true
     swipeFromEdge = false
   },
-})
-const noteSections = computed(() => {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const week = new Date(today)
-  week.setDate(today.getDate() - ((today.getDay() + 6) % 7))
-  const month = new Date(today.getFullYear(), today.getMonth(), 1)
-
-  return [
-    { label: 'Today', notes: notes.activeNotes.filter((note) => note.updatedAt >= today.getTime()) },
-    {
-      label: 'This week',
-      notes: notes.activeNotes.filter((note) => note.updatedAt >= week.getTime() && note.updatedAt < today.getTime()),
-    },
-    {
-      label: 'This month',
-      notes: notes.activeNotes.filter((note) => note.updatedAt >= month.getTime() && note.updatedAt < week.getTime()),
-    },
-    {
-      label: 'Older',
-      notes: notes.activeNotes.filter((note) => note.updatedAt < Math.min(month.getTime(), week.getTime())),
-    },
-  ].filter((section) => section.notes.length)
 })
 const wordCount = computed(
   () => notes.selectedNote?.content.match(/[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu)?.length ?? 0,
@@ -157,81 +110,16 @@ const noteMenuItems = computed<
   },
 ])
 
-onMounted(() => {
-  void notes.initialize()
-})
 watch(online, (isOnline) => {
   if (isOnline) {
     sync()
   }
 })
-watch(
-  () => notes.selectedNote?.updatedAt,
-  async () => {
-    await nextTick()
-    noteNav.value?.querySelector<HTMLElement>('.md\\:bg-violet-100')?.scrollIntoView({ block: 'nearest' })
-  },
-  { flush: 'post' },
-)
 </script>
 
 <template>
   <main class="safe-area flex h-dvh overflow-hidden">
-    <aside
-      ref="noteList"
-      class="relative w-full shrink-0 flex-col bg-stone-100 md:flex md:w-64"
-      :class="showNoteList ? 'flex' : 'hidden'"
-    >
-      <div
-        v-if="isOverDropZone"
-        class="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-xl border-2 border-dashed border-violet-500 bg-violet-100 text-violet-500"
-      >
-        Drop Markdown to import
-      </div>
-      <template v-if="notes.ready">
-        <header class="shrink-0 px-4 pt-4 pb-2 md:hidden">
-          <h1 class="text-4xl font-bold">Notes</h1>
-        </header>
-        <nav ref="noteNav" class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 py-4 md:gap-4 md:p-2">
-          <section class="flex flex-col gap-2" v-for="section in noteSections" :key="section.label">
-            <h2 class="px-2 text-xl font-semibold md:text-base">{{ section.label }}</h2>
-            <div class="overflow-hidden rounded-xl bg-white">
-              <button
-                class="block w-full border-b border-stone-200 px-4 py-2 text-start last:border-b-0 md:hover:bg-violet-100"
-                :class="{ 'md:bg-violet-100': note.id === notes.selectedId }"
-                v-for="note in section.notes"
-                :key="note.id"
-                type="button"
-                @click="openNote(note.id)"
-              >
-                <!-- title -->
-                <div class="flex">
-                  <div class="min-w-0 flex-1 truncate text-lg font-semibold text-stone-800 md:text-base">
-                    {{ noteTitle(note.content) }}
-                  </div>
-                  <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
-                </div>
-                <!-- preview -->
-                <div class="flex gap-2 text-sm text-stone-500 md:text-xs">
-                  <span class="shrink-0">{{ formatUpdatedAt(note.updatedAt) }}</span>
-                  <span class="truncate">{{ notePreview(note.content) }}</span>
-                </div>
-              </button>
-            </div>
-          </section>
-        </nav>
-        <footer class="flex shrink-0 justify-end md:hidden">
-          <button
-            class="m-2 rounded-lg bg-stone-200 p-2 text-stone-800 hover:bg-stone-100"
-            type="button"
-            title="New note"
-            @click="createNote"
-          >
-            <PencilSquareIcon class="size-5" />
-          </button>
-        </footer>
-      </template>
-    </aside>
+    <NoteList :visible="showNoteList" @create="createNote" @open="openNote" @imported="showImportedNote" />
 
     <template v-if="notes.ready">
       <article

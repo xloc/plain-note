@@ -8,12 +8,15 @@ import {
   clearLocalData,
   getMeta,
   loadNotes,
-  removeNote,
+  removeNote as removeStoredNote,
   saveNote as saveStoredNote,
   setMeta,
   type LocalNote,
 } from '../db'
 import { mergeMarkdown } from '../editor/merge'
+import { copyNote, copyRecord, fromRemote, toNote } from './noteRecords'
+
+type NewNote = Pick<Note, 'content' | 'tags' | 'resources' | 'createdAt' | 'updatedAt'>
 
 export const useNotesStore = defineStore('notes', () => {
   const notes = ref<LocalNote[]>([])
@@ -23,21 +26,65 @@ export const useNotesStore = defineStore('notes', () => {
   const syncMessage = ref('Local only')
   let syncTimer: number | undefined
 
-  function saveNote(note: LocalNote) {
-    return saveStoredNote(toRaw(note))
-  }
-
   const activeNotes = computed(() =>
     notes.value.filter((note) => !note.deleted).sort((a, b) => b.updatedAt - a.updatedAt),
   )
   const selectedNote = computed(() => notes.value.find((note) => note.id === selectedId.value && !note.deleted))
 
-  async function initialize() {
+  function saveNote(note: LocalNote) {
+    return saveStoredNote(toRaw(note))
+  }
+
+  async function addNote(source: NewNote) {
+    const note: LocalNote = {
+      ...source,
+      id: randomUUID(),
+      tags: [...source.tags],
+      resources: source.resources.map((resource) => ({ ...resource })),
+      revision: randomUUID(),
+      base: null,
+      deleted: false,
+      syncState: 'pending',
+    }
+    notes.value.push(note)
+    selectedId.value = note.id
+    await saveNote(note)
+    scheduleSync()
+  }
+
+  async function removeLocalNote(id: string) {
+    notes.value = notes.value.filter((note) => note.id !== id)
+    await removeStoredNote(id)
+  }
+
+  async function replaceLocalNote(note: LocalNote) {
+    notes.value = notes.value.filter((candidate) => candidate.id !== note.id)
+    notes.value.push(note)
+    await saveNote(note)
+  }
+
+  function selectFirstNote() {
+    selectedId.value = activeNotes.value[0]?.id ?? null
+  }
+
+  async function initialize(preferredId?: string) {
+    if (ready.value) {
+      if (preferredId && activeNotes.value.some((note) => note.id === preferredId)) selectedId.value = preferredId
+      return
+    }
+
     notes.value = await loadNotes()
-    if (!selectedNote.value) selectedId.value = activeNotes.value[0]?.id ?? null
+    if (preferredId) {
+      selectedId.value = preferredId
+    } else if (!selectedNote.value) {
+      selectFirstNote()
+    }
     ready.value = true
-    if (!selectedId.value && navigator.onLine) {
+    if (!selectedNote.value && navigator.onLine) {
       await sync()
+    }
+    if (!selectedNote.value) {
+      selectFirstNote()
     }
     if (!selectedId.value) {
       await createNote()
@@ -48,41 +95,17 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function createNote() {
     const now = Date.now()
-    const note: LocalNote = {
-      id: randomUUID(),
+    await addNote({
       content: '',
       tags: [],
       resources: [],
       createdAt: now,
       updatedAt: now,
-      revision: randomUUID(),
-      base: null,
-      deleted: false,
-      syncState: 'pending',
-    }
-    notes.value.push(note)
-    selectedId.value = note.id
-    await saveNote(note)
-    scheduleSync()
+    })
   }
 
-  async function importNote(imported: Pick<Note, 'content' | 'tags' | 'resources' | 'createdAt' | 'updatedAt'>) {
-    const note: LocalNote = {
-      id: randomUUID(),
-      content: imported.content,
-      tags: [...imported.tags],
-      resources: imported.resources.map((resource) => ({ ...resource })),
-      createdAt: imported.createdAt,
-      updatedAt: imported.updatedAt,
-      revision: randomUUID(),
-      base: null,
-      deleted: false,
-      syncState: 'pending',
-    }
-    notes.value.push(note)
-    selectedId.value = note.id
-    await saveNote(note)
-    scheduleSync()
+  async function importNote(imported: NewNote) {
+    await addNote(imported)
   }
 
   function updateSelected(update: { content: string }) {
@@ -101,8 +124,7 @@ export const useNotesStore = defineStore('notes', () => {
     const note = selectedNote.value
     if (!note || note.deleted) return
     if (note.base === null) {
-      notes.value = notes.value.filter((candidate) => candidate.id !== note.id)
-      await removeNote(note.id)
+      await removeLocalNote(note.id)
     } else {
       Object.assign(note, {
         deleted: true,
@@ -112,7 +134,7 @@ export const useNotesStore = defineStore('notes', () => {
       })
       await saveNote(note)
     }
-    selectedId.value = activeNotes.value[0]?.id ?? null
+    selectFirstNote()
     if (!selectedId.value) {
       await createNote()
     }
@@ -186,8 +208,7 @@ export const useNotesStore = defineStore('notes', () => {
             })
             const current = notes.value.find((note) => note.id === candidate.id)
             if (current?.revision === revision) {
-              notes.value = notes.value.filter((note) => note.id !== candidate.id)
-              await removeNote(candidate.id)
+              await removeLocalNote(candidate.id)
             } else if (current) {
               current.base = copyRecord(tombstone)
               await saveNote(current)
@@ -231,8 +252,7 @@ export const useNotesStore = defineStore('notes', () => {
         const serverIds = new Set(response.changes.map((change) => change.id))
         const obsolete = notes.value.filter((note) => note.syncState === 'synced' && !serverIds.has(note.id))
         for (const note of obsolete) {
-          notes.value = notes.value.filter((candidate) => candidate.id !== note.id)
-          await removeNote(note.id)
+          await removeLocalNote(note.id)
         }
       }
       for (const change of response.changes) {
@@ -252,7 +272,7 @@ export const useNotesStore = defineStore('notes', () => {
       firstPage = false
     }
     if (!selectedNote.value) {
-      selectedId.value = activeNotes.value[0]?.id ?? null
+      selectFirstNote()
     }
   }
 
@@ -268,8 +288,7 @@ export const useNotesStore = defineStore('notes', () => {
         updatedAt: change.updatedAt,
       }
       if (local.revision === change.revision || local.syncState === 'synced' || local.deleted) {
-        notes.value = notes.value.filter((note) => note.id !== change.id)
-        await removeNote(change.id)
+        await removeLocalNote(change.id)
       } else if (local.base?.revision !== change.revision) {
         await mergeConflict(local, tombstone)
       }
@@ -292,10 +311,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     const remote = (await getNote(change.id)).note
-    const replacement = fromRemote(remote)
-    notes.value = notes.value.filter((note) => note.id !== change.id)
-    notes.value.push(replacement)
-    await saveNote(replacement)
+    await replaceLocalNote(fromRemote(remote))
   }
 
   async function mergeConflict(local: LocalNote, remote: NoteRecord) {
@@ -305,8 +321,7 @@ export const useNotesStore = defineStore('notes', () => {
 
     if ('deleted' in remote) {
       if (local.deleted) {
-        notes.value = notes.value.filter((note) => note.id !== local.id)
-        await removeNote(local.id)
+        await removeLocalNote(local.id)
         return
       }
 
@@ -319,10 +334,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     if (local.deleted) {
-      const replacement = fromRemote(remote)
-      notes.value = notes.value.filter((note) => note.id !== local.id)
-      notes.value.push(replacement)
-      await saveNote(replacement)
+      await replaceLocalNote(fromRemote(remote))
       return
     }
 
@@ -348,60 +360,7 @@ export const useNotesStore = defineStore('notes', () => {
     updateSelected,
     deleteSelected,
     select,
-    scheduleSync,
     resetLocalData,
     sync,
-    pushPending,
-    pullChanges,
-    applyChange,
   }
 })
-
-function toNote(note: LocalNote): Note {
-  return {
-    id: note.id,
-    content: note.content,
-    tags: [...note.tags],
-    resources: note.resources.map((resource) => ({ ...resource })),
-    createdAt: note.createdAt,
-    updatedAt: note.updatedAt,
-    revision: note.revision,
-  }
-}
-
-function fromRemote(note: Note): LocalNote {
-  const current = copyNote(note)
-  return {
-    ...current,
-    base: copyNote(note),
-    deleted: false,
-    syncState: 'synced',
-  }
-}
-
-function copyNote(note: Note): Note {
-  return {
-    ...note,
-    tags: [...note.tags],
-    resources: note.resources.map((resource) => ({ ...resource })),
-  }
-}
-
-function copyRecord(record: NoteRecord): NoteRecord {
-  return 'deleted' in record ? { ...record } : copyNote(record)
-}
-
-export function noteTitle(content: string) {
-  return noteHeading(content)?.[1].trim() || 'Untitled'
-}
-
-export function notePreview(content: string) {
-  const heading = noteHeading(content)
-  const body = heading ? content.slice(heading[0].length) : content
-  const oneline = body.replace(/\n+/g, ' ').trim().slice(0, 80)
-  return oneline || 'Empty'
-}
-
-function noteHeading(content: string) {
-  return content.match(/^#\s+([^\n]*?)(?:\s+#+)?\s*(?=\n|$)/)
-}

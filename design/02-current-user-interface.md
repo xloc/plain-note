@@ -24,6 +24,7 @@ The main interaction choices are:
 - Typing `> ` at the start of a paragraph creates a toggleable details region. Its summary remains editable, and only the disclosure triangle toggles the body.
 - Typing `| ` at the start of a paragraph creates a blockquote. The stored Markdown still uses the standard `> ` quote syntax.
 - The visible screen, edit/preview mode, and last open note are remembered locally so reopening the app resumes the same context.
+- Each note has a canonical bookmarkable route at `/notes/<uuid>`. Browser back and forward restore the corresponding selected note.
 - Scroll positions for the five most recently viewed notes are remembered locally for five minutes.
 - The editor header stays fixed while document content scrolls beneath it. Trailing viewport space allows the whole document to scroll above the viewport, and clicking that space places the cursor at the document end.
 - The document is centered at a maximum width of `72ch` for readable lines. Wide tables scroll horizontally within their own region instead of widening the page.
