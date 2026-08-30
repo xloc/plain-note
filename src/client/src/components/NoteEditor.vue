@@ -11,6 +11,7 @@ import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tabl
 import { EditorView } from 'prosemirror-view'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { autoLinks } from '../editor/autoLinks'
+import { DetailsView } from '../editor/DetailsView'
 import { markdownParser, markdownSerializer, schema, tabCharacter } from '../editor/markdown'
 import { RecentScrollPositions } from '../editor/RecentScrollPositions'
 import { TableView } from '../editor/TableView'
@@ -20,6 +21,7 @@ const props = withDefaults(defineProps<{ documentId: string; modelValue: string;
 })
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
 const {
+  blockquote,
   bullet_list: bulletList,
   code_block: codeBlock,
   hard_break: hardBreak,
@@ -28,6 +30,8 @@ const {
   ordered_list: orderedList,
   paragraph,
 } = schema.nodes
+const details = schema.nodes.details
+const detailsSummary = schema.nodes.details_summary
 const { code, link } = schema.marks
 const codeIndentation = ' '.repeat(4)
 const scrollPositions = new RecentScrollPositions()
@@ -48,6 +52,16 @@ function restoreScrollPosition(documentId: string) {
 const insertHardBreak: Command = (state, dispatch) => {
   if (dispatch) {
     dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
+  }
+  return true
+}
+
+const splitDetailsSummary: Command = (state, dispatch) => {
+  const { $from, $to } = state.selection
+  if (!$from.sameParent($to) || $from.parent.type !== detailsSummary) return false
+  if (dispatch) {
+    const transaction = state.tr.deleteSelection()
+    dispatch(transaction.split(transaction.selection.from, 1, [{ type: paragraph }]).scrollIntoView())
   }
   return true
 }
@@ -167,6 +181,15 @@ function plugins() {
           const transaction = state.tr.replaceWith(start - 1, end, horizontalRule.create())
           return transaction.setSelection(NodeSelection.create(transaction.doc, start - 1))
         }),
+        new InputRule(/^>\s$/, (state) => {
+          const { $from } = state.selection
+          if ($from.depth !== 1 || $from.parent.type !== paragraph) return null
+          const position = $from.before()
+          const node = details.create({ open: true }, [detailsSummary.create()])
+          const transaction = state.tr.replaceWith(position, position + $from.parent.nodeSize, node)
+          return transaction.setSelection(TextSelection.create(transaction.doc, position + 2))
+        }),
+        wrappingInputRule(/^\|\s$/, blockquote),
         textblockTypeInputRule(/^(#{1,6})\s$/, schema.nodes.heading, (match) => ({ level: match[1].length })),
         wrappingInputRule(/^\s*([-+*])\s$/, bulletList),
         wrappingInputRule(
@@ -186,7 +209,7 @@ function plugins() {
       'Mod-`': toggleMark(code),
       Backspace: deleteSelectedTablePart,
       Delete: deleteSelectedTablePart,
-      Enter: chainCommands(splitListItem(listItem), codeBlockEnter),
+      Enter: chainCommands(splitListItem(listItem), codeBlockEnter, splitDetailsSummary),
       'Shift-Enter': chainCommands(codeBlockEnter, insertHardBreak),
       Tab: chainCommands(goToNextCell(1), sinkListItem(listItem), insertCodeIndentation, insertTab),
       'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(listItem), removeCodeIndentation, removeTab),
@@ -223,6 +246,7 @@ onMounted(() => {
     attributes: { class: 'px-4 py-2 md:pt-[var(--editor-header-space)] outline-none' },
     editable: () => props.editable,
     nodeViews: {
+      details: (node, view, getPos) => new DetailsView(node, view, getPos),
       table: (node, view, getPos) => new TableView(node, view, getPos),
     },
     state: EditorState.create({
@@ -306,6 +330,8 @@ onBeforeUnmount(() => {
 /* Section: General */
 
 :deep(.ProseMirror) {
+  --content-indent: 1.5rem;
+
   tab-size: 4;
   white-space: break-spaces;
 }
@@ -346,6 +372,20 @@ onBeforeUnmount(() => {
   line-height: var(--editor-line-height);
 }
 
+:deep(.ProseMirror hr) {
+  align-items: center;
+  border: 0;
+  display: flex;
+  height: 1lh;
+  margin: 0;
+}
+
+:deep(.ProseMirror hr::after) {
+  border-top: 1px solid currentColor;
+  content: '';
+  width: 100%;
+}
+
 :deep(.ProseMirror li p) {
   margin: 0;
 }
@@ -357,7 +397,7 @@ onBeforeUnmount(() => {
 
 :deep(.ProseMirror ul),
 :deep(.ProseMirror ol) {
-  padding-left: 1.5rem;
+  padding-left: var(--content-indent);
 }
 
 :deep(.ProseMirror ul) {
@@ -368,10 +408,41 @@ onBeforeUnmount(() => {
   list-style: decimal;
 }
 
+:deep(.ProseMirror details) {
+  padding-left: var(--content-indent);
+  position: relative;
+}
+
+:deep(.ProseMirror details::before) {
+  background: color-mix(in srgb, currentColor 25%, transparent);
+  bottom: 0;
+  content: '';
+  left: calc(var(--content-indent) / 2);
+  position: absolute;
+  top: 1.5em;
+  width: 1px;
+}
+
+:deep(.ProseMirror details > summary) {
+  margin-left: calc(0.5rem - var(--content-indent));
+  outline: none;
+}
+
 :deep(.ProseMirror blockquote) {
-  border-left: 0.25rem solid currentColor;
-  margin: 0 0 1rem;
-  padding-left: 1rem;
+  padding-left: var(--content-indent);
+  position: relative;
+}
+
+:deep(.ProseMirror blockquote::before) {
+  --y-inset: 0;
+  background: currentColor;
+  bottom: var(--y-inset);
+  content: '';
+  left: calc((var(--content-indent) - 0.25rem) / 2);
+  position: absolute;
+  top: var(--y-inset);
+  width: 0.25rem;
+  border-radius: 999px;
 }
 
 :deep(.ProseMirror code) {
@@ -406,7 +477,7 @@ onBeforeUnmount(() => {
 
   font-weight: 600;
   line-height: 1.2;
-  margin: calc(4 * var(--spacing)) 0;
+  margin: calc(2 * var(--spacing)) 0;
   overflow: hidden;
   font-size: 1.2rem;
 }

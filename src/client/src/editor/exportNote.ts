@@ -1,5 +1,7 @@
 import type { Note } from '../../../shared/note'
+import { DOMSerializer } from 'prosemirror-model'
 import { bareUrls, markdownParser } from './markdown'
+import { schema } from './markdown'
 import noteExportCss from './noteExport.css?raw'
 import tailwindPreflightCss from 'tailwindcss/preflight.css?inline'
 
@@ -24,7 +26,9 @@ function download(content: string, name: string, type: string): void {
 
 function renderHtmlBody(markdown: string) {
   const template = document.createElement('template')
-  template.innerHTML = markdownParser.tokenizer.render(markdown)
+  const note = markdownParser.parse(markdown)
+  template.content.append(DOMSerializer.fromSchema(schema).serializeFragment(note.content))
+
   const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT)
   const textNodes: Text[] = []
 

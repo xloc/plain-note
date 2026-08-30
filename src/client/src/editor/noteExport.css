@@ -10,9 +10,12 @@
 }
 
 .note-content {
+  --content-indent: 1.5rem;
+
   overflow-wrap: anywhere;
   padding: 0.5rem 1rem;
   tab-size: 4;
+  white-space: break-spaces;
 }
 
 .note-content a {
@@ -28,6 +31,10 @@
   margin-block: 0;
 }
 
+.note-content p:empty {
+  min-height: 1lh;
+}
+
 .note-content li p,
 .note-content li ul,
 .note-content li ol {
@@ -36,7 +43,7 @@
 
 .note-content ul,
 .note-content ol {
-  padding-left: 1.5rem;
+  padding-left: var(--content-indent);
 }
 
 .note-content ul {
@@ -47,10 +54,56 @@
   list-style: decimal;
 }
 
+.note-content hr {
+  align-items: center;
+  border: 0;
+  display: flex;
+  height: 1lh;
+  margin: 0;
+}
+
+.note-content hr::after {
+  border-top: 1px solid currentColor;
+  content: '';
+  width: 100%;
+}
+
+.note-content details {
+  padding-left: var(--content-indent);
+  position: relative;
+}
+
+.note-content details::before {
+  background: color-mix(in srgb, currentColor 25%, transparent);
+  bottom: 0;
+  content: '';
+  left: calc(var(--content-indent) / 2);
+  position: absolute;
+  top: 1.5em;
+  width: 1px;
+}
+
+.note-content details > summary {
+  margin-left: calc(0.5rem - var(--content-indent));
+  outline: none;
+}
+
 .note-content blockquote {
-  border-left: 0.25rem solid currentColor;
-  margin: 0 0 1rem;
-  padding-left: 1rem;
+  margin: 0;
+  padding-left: var(--content-indent);
+  position: relative;
+}
+
+.note-content blockquote::before {
+  --y-inset: 0;
+  background: currentColor;
+  border-radius: 999px;
+  bottom: var(--y-inset);
+  content: '';
+  left: calc((var(--content-indent) - 0.25rem) / 2);
+  position: absolute;
+  top: var(--y-inset);
+  width: 0.25rem;
 }
 
 .note-content code {
@@ -120,6 +173,7 @@
   border-left: 1px solid var(--table-border-color);
   border-spacing: 0;
   border-top: 1px solid var(--table-border-color);
+  margin-bottom: 0.5rem;
 }
 
 .note-content tr {

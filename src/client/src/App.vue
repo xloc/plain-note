@@ -61,7 +61,9 @@ const importMarkdownFile = async (file: File) => {
 }
 const { isOverDropZone } = useDropZone(noteList, {
   onDrop(files) {
-    const file = files?.find((candidate) => candidate.type === 'text/markdown' || /\.(md|markdown)$/i.test(candidate.name))
+    const file = files?.find(
+      (candidate) => candidate.type === 'text/markdown' || /\.(md|markdown)$/i.test(candidate.name),
+    )
     if (file) void importMarkdownFile(file)
   },
 })
