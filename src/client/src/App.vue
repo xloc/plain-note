@@ -71,7 +71,10 @@ useSwipe(editorScreen, {
   threshold: 80,
   onSwipeStart: (event) => {
     const touch = event.touches[0]
-    swipeFromEdge = Boolean(touch && window.innerWidth < 768 && touch.clientX <= 32)
+    const target = event.target instanceof Element ? event.target : null
+    swipeFromEdge = Boolean(
+      touch && window.innerWidth < 768 && touch.clientX <= 32 && !target?.closest('.table-scroll'),
+    )
   },
   onSwipeEnd: (event, direction) => {
     if (event.type === 'touchend' && swipeFromEdge && direction === 'right') showNoteList.value = true

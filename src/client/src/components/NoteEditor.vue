@@ -309,8 +309,11 @@ onBeforeUnmount(() => {
 /* Section: Note content padding */
 
 .editor-scroll {
+  --content-max-width: 72ch;
   --editor-header-space: 0px;
   --editor-line-height: 1.4;
+
+  overflow-x: hidden;
 }
 
 @media (min-width: 48rem) {
@@ -332,7 +335,11 @@ onBeforeUnmount(() => {
 :deep(.ProseMirror) {
   --content-indent: 1.5rem;
 
+  margin-inline: auto;
+  max-width: var(--content-max-width);
+  overflow-wrap: anywhere;
   tab-size: 4;
+  width: 100%;
   white-space: break-spaces;
 }
 
@@ -463,6 +470,7 @@ onBeforeUnmount(() => {
   line-height: 1.2;
   overflow: auto;
   padding: calc(3 * var(--spacing)) calc(4 * var(--spacing));
+  margin: calc(2 * var(--spacing));
 }
 
 /* Section: Headings */
@@ -526,10 +534,23 @@ onBeforeUnmount(() => {
 :deep(.ProseMirror .tableWrapper) {
   --table-control-size: 1.25rem;
 
-  display: inline-block;
-  margin-bottom: calc(2 * var(--spacing));
-  position: relative;
+  margin-inline: auto;
+  max-width: 100%;
   vertical-align: top;
+  width: fit-content;
+}
+
+:deep(.ProseMirror .table-scroll) {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+:deep(.ProseMirror .table-canvas) {
+  padding-block: var(--table-control-size);
+  padding-inline: var(--table-control-size);
+  position: relative;
+  width: max-content;
 }
 
 :deep(.ProseMirror table) {

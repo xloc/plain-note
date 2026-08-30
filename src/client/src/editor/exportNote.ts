@@ -55,6 +55,13 @@ function renderHtmlBody(markdown: string) {
     text.replaceWith(fragment)
   }
 
+  for (const table of template.content.querySelectorAll('table')) {
+    const scroller = document.createElement('div')
+    scroller.className = 'table-scroll'
+    table.replaceWith(scroller)
+    scroller.append(table)
+  }
+
   return template.innerHTML
 }
 

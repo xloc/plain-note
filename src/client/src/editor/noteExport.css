@@ -9,12 +9,20 @@
     ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
+body {
+  overflow-x: hidden;
+}
+
 .note-content {
   --content-indent: 1.5rem;
+  --content-max-width: 72ch;
 
+  margin-inline: auto;
+  max-width: var(--content-max-width);
   overflow-wrap: anywhere;
   padding: 0.5rem 1rem;
   tab-size: 4;
+  width: 100%;
   white-space: break-spaces;
 }
 
@@ -117,6 +125,7 @@
   background-color: #e7e5e4;
   border-radius: 0.5rem;
   line-height: 1.2;
+  margin: 0.5rem;
   overflow: auto;
   padding: 0.75rem 1rem;
 }
@@ -173,7 +182,13 @@
   border-left: 1px solid var(--table-border-color);
   border-spacing: 0;
   border-top: 1px solid var(--table-border-color);
-  margin-bottom: 0.5rem;
+  margin-inline: auto;
+}
+
+.note-content .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
 }
 
 .note-content tr {

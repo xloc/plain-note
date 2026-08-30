@@ -11,6 +11,8 @@ import type { EditorView, NodeView, ViewMutationRecord } from 'prosemirror-view'
 
 export class TableView implements NodeView {
   dom = document.createElement('div')
+  scroller = document.createElement('div')
+  canvas = document.createElement('div')
   table = document.createElement('table')
   contentDOM = document.createElement('tbody')
   controls = document.createElement('div')
@@ -33,8 +35,12 @@ export class TableView implements NodeView {
     private getPos: () => number | undefined,
   ) {
     this.dom.className = 'tableWrapper'
+    this.scroller.className = 'table-scroll'
+    this.canvas.className = 'table-canvas'
     this.table.append(this.contentDOM)
-    this.dom.append(this.table, this.controls)
+    this.canvas.append(this.table, this.controls)
+    this.scroller.append(this.canvas)
+    this.dom.append(this.scroller)
 
     this.controls.className = 'table-controls'
     this.controls.contentEditable = 'false'
@@ -123,26 +129,29 @@ export class TableView implements NodeView {
   }
 
   private layoutControls() {
+    const tableLeft = this.table.offsetLeft
+    const tableTop = this.table.offsetTop
     const cells = Array.from(this.contentDOM.rows[0]?.cells ?? [])
     this.columnHandles.forEach((handle, column) => {
       const cell = cells[column]
       handle.hidden = !cell
       if (cell) {
-        handle.style.left = `${cell.offsetLeft}px`
+        handle.style.left = `${tableLeft + cell.offsetLeft}px`
+        handle.style.top = `${tableTop}px`
         handle.style.width = `${cell.offsetWidth}px`
       }
     })
     Array.from(this.contentDOM.rows).forEach((row, index) => {
       const handle = this.rowHandles[index]
       handle.style.height = `${row.offsetHeight}px`
-      handle.style.left = '0'
-      handle.style.top = `${row.offsetTop}px`
+      handle.style.left = `${tableLeft}px`
+      handle.style.top = `${tableTop + row.offsetTop}px`
     })
-    this.addColumnButton.style.left = `${this.table.offsetWidth}px`
+    this.addColumnButton.style.left = `${tableLeft + this.table.offsetWidth}px`
     this.addColumnButton.style.height = `${this.table.offsetHeight}px`
-    this.addColumnButton.style.top = '0'
-    this.addRowButton.style.left = '0'
-    this.addRowButton.style.top = `${this.table.offsetHeight}px`
+    this.addColumnButton.style.top = `${tableTop}px`
+    this.addRowButton.style.left = `${tableLeft}px`
+    this.addRowButton.style.top = `${tableTop + this.table.offsetHeight}px`
     this.addRowButton.style.width = `${this.table.offsetWidth}px`
   }
 
@@ -295,14 +304,15 @@ export class TableView implements NodeView {
     }
     const boundary =
       this.draggedAxis === 'column'
-        ? item.offsetLeft + (this.draggedIndex < index ? item.offsetWidth : 0)
-        : item.offsetTop + (this.draggedIndex < index ? item.offsetHeight : 0)
+        ? this.table.offsetLeft + item.offsetLeft + (this.draggedIndex < index ? item.offsetWidth : 0)
+        : this.table.offsetTop + item.offsetTop + (this.draggedIndex < index ? item.offsetHeight : 0)
     this.dropIndicator.className = `table-${this.draggedAxis}-drop-target`
     this.dropIndicator.hidden = false
     this.dropIndicator.style.height = this.draggedAxis === 'column' ? `${this.table.offsetHeight}px` : ''
     this.dropIndicator.style.width = this.draggedAxis === 'row' ? `${this.table.offsetWidth}px` : ''
-    this.dropIndicator.style.left = this.draggedAxis === 'column' ? `${boundary}px` : '0'
-    this.dropIndicator.style.top = this.draggedAxis === 'row' ? `${boundary}px` : '0'
+    this.dropIndicator.style.left =
+      this.draggedAxis === 'column' ? `${boundary}px` : `${this.table.offsetLeft}px`
+    this.dropIndicator.style.top = this.draggedAxis === 'row' ? `${boundary}px` : `${this.table.offsetTop}px`
   }
 
   private hideDropTarget() {

@@ -26,6 +26,7 @@ The main interaction choices are:
 - The visible screen, edit/preview mode, and last open note are remembered locally so reopening the app resumes the same context.
 - Scroll positions for the five most recently viewed notes are remembered locally for five minutes.
 - The editor header stays fixed while document content scrolls beneath it. Trailing viewport space allows the whole document to scroll above the viewport, and clicking that space places the cursor at the document end.
+- The document is centered at a maximum width of `72ch` for readable lines. Wide tables scroll horizontally within their own region instead of widening the page.
 - Tab remains inside the editor: it navigates tables, indents lists, inserts four spaces in code blocks, and inserts a literal tab in normal text.
 - Heading levels are visible through a small `h1`–`h6` label and a suffix line after the heading’s final visual line.
 - Code is visually distinct but remains editable Markdown content.
