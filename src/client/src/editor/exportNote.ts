@@ -112,15 +112,14 @@ export function parseMarkdownImport(source: string): MarkdownImport {
 
   try {
     const tags = JSON.parse(metadata.tags ?? '[]') as unknown
-    const resources = JSON.parse(metadata.resources ?? '[]') as unknown
-    if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string') || !Array.isArray(resources)) return plain
+    if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === 'string')) return plain
 
     const createdAt = Number(metadata.createdAt)
     const updatedAt = Number(metadata.updatedAt)
     return {
       content: source.slice(frontMatter[0].length).replace(/^\r?\n/, ''),
       tags,
-      resources: resources as Note['resources'],
+      resources: [],
       createdAt: Number.isFinite(createdAt) ? createdAt : now,
       updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
     }

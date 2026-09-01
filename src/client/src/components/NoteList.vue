@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { PencilSquareIcon } from '@heroicons/vue/24/outline'
 import { useDropZone } from '@vueuse/core'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, useTemplateRef, watch } from 'vue'
 import { parseMarkdownImport } from '../editor/exportNote'
-import { formatUpdatedAt, groupNotesByUpdatedAt, notePreview, noteTitle } from '../notePresentation'
+import { formatDateTime, groupNotesByUpdatedAt, notePreview, noteTitle } from '../presentation'
 import { useNotesStore } from '../stores/notes'
 
 defineProps<{ visible: boolean }>()
@@ -14,8 +14,8 @@ const emit = defineEmits<{
 }>()
 
 const notes = useNotesStore()
-const noteList = ref<HTMLElement | null>(null)
-const noteNav = ref<HTMLElement | null>(null)
+const noteList = useTemplateRef<HTMLElement>('noteList')
+const noteNav = useTemplateRef<HTMLElement>('noteNav')
 const noteSections = computed(() => groupNotesByUpdatedAt(notes.activeNotes))
 
 const { isOverDropZone } = useDropZone(noteList, {
@@ -76,7 +76,7 @@ watch(
               </div>
               <!-- preview -->
               <div class="flex gap-2 text-sm text-stone-500 md:text-xs">
-                <span class="shrink-0">{{ formatUpdatedAt(note.updatedAt) }}</span>
+                <span class="shrink-0">{{ formatDateTime(note.updatedAt) }}</span>
                 <span class="truncate">{{ notePreview(note.content) }}</span>
               </div>
             </button>

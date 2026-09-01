@@ -25,7 +25,7 @@ Editor → IndexedDB → Worker API → R2 (authoritative notes and resources)
 
 - **Vue 3** provides the frontend application. **Workers + Static Assets** serve the built PWA and provide the API.
 - **IndexedDB** holds the browser's local working copy and pending changes. The service worker caches application assets; authenticated API responses are not treated as generally cacheable content.
-- **R2 is authoritative storage.** Store each active note as `notes/<note-id>/note.md`, with human-readable Markdown content and essential metadata in front matter. Store attachments separately as `notes/<note-id>/resources/<name>`; do not embed binary data in the note file.
+- **R2 is authoritative storage.** Store each active note as `notes/<note-id>/note.md`, with human-readable Markdown content and essential metadata in front matter. Store attachments separately as `notes/<note-id>/resources/<resource-id>`; do not embed binary data in the note file.
 - **D1 is derived, disposable state.** It may hold note metadata, a monotonic change journal, and optional search/tag/backlink indexes. It must contain no information required to recover notes, resources, or deletions. Schema changes rebuild D1 from R2 instead of migrating derived records in place.
 - **Synchronization** uses a D1 sequence journal (for example, `GET /api/sync?after=<sequence>`) to discover incremental puts and deletes. Clients then fetch changed authoritative objects from R2.
 - **Optimistic concurrency** uses a note revision and a client-provided base revision. A revision mismatch produces a conflict rather than an implicit last-write-wins update.

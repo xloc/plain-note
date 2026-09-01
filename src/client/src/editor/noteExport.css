@@ -162,7 +162,8 @@ body {
   font-size: 0.75rem;
   font-weight: 400;
   margin-left: 0.5rem;
-  margin-right: -100%;
+  /* Reserve space for the label while letting the decorative line fill the remaining width. */
+  margin-right: calc(-100% + 1rem);
   opacity: 0.5;
   vertical-align: middle;
   width: 100%;

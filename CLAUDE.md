@@ -24,3 +24,5 @@ Follow established best practices when they make the code or project simpler. Ig
 - **No aria** Don’t add aria attributes for simplicity
 
 See [design/00-code-style-examples.md](design/00-code-style-examples.md) for examples.
+
+See [design/00-design-document-style.md](design/00-design-document-style.md) for design document guidance.

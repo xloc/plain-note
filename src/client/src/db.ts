@@ -1,5 +1,11 @@
 import type { NoteRecord, NoteResource } from '../../shared/note'
 
+export type LocalResource = NoteResource & {
+  noteId: string
+  blob: Blob
+  syncState: 'pending' | 'synced'
+}
+
 export type LocalNote = {
   id: string
   content: string
@@ -27,9 +33,38 @@ export async function removeNote(id: string) {
   await request((await database).transaction('notes', 'readwrite').objectStore('notes').delete(id))
 }
 
+export async function getResource(noteId: string, id: string) {
+  return request<LocalResource | undefined>(
+    (await database).transaction('resources').objectStore('resources').get([noteId, id]),
+  )
+}
+
+export async function loadResources(noteId: string) {
+  return request<LocalResource[]>(
+    (await database).transaction('resources').objectStore('resources').index('noteId').getAll(noteId),
+  )
+}
+
+export async function saveResource(resource: LocalResource) {
+  await request((await database).transaction('resources', 'readwrite').objectStore('resources').put(resource))
+}
+
+export async function removeResource(noteId: string, id: string) {
+  await request((await database).transaction('resources', 'readwrite').objectStore('resources').delete([noteId, id]))
+}
+
+export async function removeNoteResources(noteId: string) {
+  const transaction = (await database).transaction('resources', 'readwrite')
+  const store = transaction.objectStore('resources')
+  const keys = await request<IDBValidKey[]>(store.index('noteId').getAllKeys(noteId))
+  for (const key of keys) store.delete(key)
+  await complete(transaction)
+}
+
 export async function clearLocalData() {
-  const transaction = (await database).transaction(['notes', 'meta'], 'readwrite')
+  const transaction = (await database).transaction(['notes', 'resources', 'meta'], 'readwrite')
   transaction.objectStore('notes').clear()
+  transaction.objectStore('resources').clear()
   transaction.objectStore('meta').clear()
   await complete(transaction)
 }
@@ -47,16 +82,13 @@ export async function setMeta(key: string, value: string | number) {
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const result = indexedDB.open('plain-note', 2)
+    const result = indexedDB.open('plain-note', 3)
     result.onupgradeneeded = () => {
-      if (result.result.objectStoreNames.contains('notes')) {
-        result.result.deleteObjectStore('notes')
+      if (!result.result.objectStoreNames.contains('notes')) result.result.createObjectStore('notes', { keyPath: 'id' })
+      if (!result.result.objectStoreNames.contains('meta')) result.result.createObjectStore('meta', { keyPath: 'key' })
+      if (!result.result.objectStoreNames.contains('resources')) {
+        result.result.createObjectStore('resources', { keyPath: ['noteId', 'id'] }).createIndex('noteId', 'noteId')
       }
-      if (result.result.objectStoreNames.contains('meta')) {
-        result.result.deleteObjectStore('meta')
-      }
-      result.result.createObjectStore('notes', { keyPath: 'id' })
-      result.result.createObjectStore('meta', { keyPath: 'key' })
     }
     result.onsuccess = () => resolve(result.result)
     result.onerror = () => reject(result.error)

@@ -1,4 +1,4 @@
-import { markdownParser } from './markdown.ts'
+import { markdownParser } from '../editor/markdown.ts'
 
 type Edit = {
   from: number

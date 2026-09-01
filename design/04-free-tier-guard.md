@@ -10,19 +10,20 @@ Keep account usage below the D1 and R2 free-tier limits.
 - Cloudflare REST API: total D1 and R2 storage
 - Account-wide totals: all databases and buckets
 - One-minute cache: fewer usage requests
+- Local development: summed local R2 objects with a 100 MB limit
 
 ## Cutoff
 
 Storage work stops at 80% of each free limit.
 
-| Limit | Cutoff |
-| --- | ---: |
-| D1 rows read | 4,000,000 per day |
-| D1 rows written | 80,000 per day |
-| D1 storage | 4 GB |
-| R2 Class A operations | 800,000 per 30 days |
+| Limit                 |                Cutoff |
+| --------------------- | --------------------: |
+| D1 rows read          |     4,000,000 per day |
+| D1 rows written       |        80,000 per day |
+| D1 storage            |                  4 GB |
+| R2 Class A operations |   800,000 per 30 days |
 | R2 Class B operations | 8,000,000 per 30 days |
-| R2 storage | 8 GB |
+| R2 storage            |                  8 GB |
 
 Any R2 Infrequent Access data blocks writes because that storage class has no free allowance.
 
@@ -32,7 +33,7 @@ Any R2 Infrequent Access data blocks writes because that storage class has no fr
 - Synchronization: D1 reads and writes; possible R2 rebuild work
 - Note write or delete: all related D1 and R2 limits
 - Health check: no usage check
-- Local development: no usage check
+- Local development: R2 writes use the same 80% cutoff against the local limit
 
 ## Failure behavior
 

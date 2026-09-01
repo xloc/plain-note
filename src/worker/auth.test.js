@@ -6,6 +6,7 @@ import { requireAccess } from './auth.ts'
 test('allows local development without Access configuration', async () => {
   assert.equal(await requireAccess(new Request('http://localhost:8787/api/health'), {}), null)
   assert.equal(await requireAccess(new Request('http://127.0.0.1:8787/api/health'), {}), null)
+  assert.equal(await requireAccess(new Request('http://192.168.1.20:8787/api/health'), {}), null)
 })
 
 test('fails closed when deployed without Access configuration', async () => {

@@ -10,18 +10,6 @@ export function notePreview(content: string) {
   return body.replace(/\n+/g, ' ').trim().slice(0, 80) || 'Empty'
 }
 
-export function formatUpdatedAt(timestamp: number) {
-  const date = new Date(timestamp)
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-  }
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
 export function groupNotesByUpdatedAt(notes: LocalNote[]) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -46,6 +34,40 @@ export function groupNotesByUpdatedAt(notes: LocalNote[]) {
   ].filter((section) => section.notes.length)
 }
 
+export function formatResourceSize(size?: number) {
+  if (size === undefined) return 'Unknown size'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 ** 2) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 ** 3) return `${(size / 1024 ** 2).toFixed(1)} MB`
+  return `${(size / 1024 ** 3).toFixed(1)} GB`
+}
+
+export function formatResourceTime(createdAt?: number) {
+  return createdAt === undefined ? 'Unknown upload time' : formatDateTime(createdAt)
+}
+
+export function formatDateTime(timestamp: number) {
+  const date = new Date(timestamp)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  const time = [date.getHours(), date.getMinutes()].map(pad).join(':')
+
+  if (sameDay(date, today)) return time
+  if (sameDay(date, yesterday)) return `Yesterday ${time}`
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
+}
+
 function noteHeading(content: string) {
   return content.match(/^#\s+([^\n]*?)(?:\s+#+)?\s*(?=\n|$)/)
+}
+
+function sameDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate()
+}
+
+function pad(value: number) {
+  return String(value).padStart(2, '0')
 }

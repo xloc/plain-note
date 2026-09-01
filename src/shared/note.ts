@@ -3,6 +3,7 @@ export type NoteResource = {
   name: string
   mime: string
   size: number
+  createdAt: number
 }
 
 export type Note = {
@@ -48,6 +49,12 @@ export type SyncResponse = {
   reset: boolean
   cursor: number
   changes: Change[]
+}
+
+export type StorageUsage = {
+  usedBytes: number
+  limitBytes: number
+  cutoffBytes: number
 }
 
 export type ConflictResponse = {

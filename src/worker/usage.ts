@@ -1,3 +1,6 @@
+import type { StorageUsage } from '../shared/note'
+import { isLocalRequest } from './environment.ts'
+
 export type UsageEnv = {
   CLOUDFLARE_ACCOUNT_ID?: string
   CLOUDFLARE_USAGE_TOKEN?: string
@@ -15,6 +18,7 @@ type Usage = {
 
 const CUTOFF = 0.8
 const CACHE_MS = 60_000
+const DEFAULT_DEV_R2_STORAGE_LIMIT_BYTES = 100_000_000
 const limits = {
   d1RowsRead: 5_000_000,
   d1RowsWritten: 100_000,
@@ -53,9 +57,46 @@ const r2ClassB = new Set([
 const r2Free = new Set(['AbortMultipartUpload', 'DeleteBucket', 'DeleteObject'])
 const usageCache = new Map<string, { expiresAt: number, value: Promise<Usage> }>()
 
-export async function requireFreeTierCapacity(request: Request, env: UsageEnv) {
-  if (isLocal(request) || new URL(request.url).pathname === '/api/health')
+export async function storageUsageResponse(request: Request, env: UsageEnv & { NOTES: R2Bucket }) {
+  if (isLocalRequest(request)) {
+    try {
+      return Response.json(await getLocalStorageUsage(env.NOTES), { headers: { 'Cache-Control': 'no-store' } })
+    }
+    catch {
+      return error('usage_unavailable', 503)
+    }
+  }
+
+  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_USAGE_TOKEN)
+    return error('usage_not_configured', 500)
+
+  try {
+    const usage = await getUsage(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_USAGE_TOKEN)
+    return Response.json({
+      usedBytes: usage.r2StorageBytes,
+      limitBytes: limits.r2StorageBytes,
+      cutoffBytes: limits.r2StorageBytes * CUTOFF,
+    } satisfies StorageUsage, { headers: { 'Cache-Control': 'no-store' } })
+  }
+  catch {
+    return error('usage_unavailable', 503)
+  }
+}
+
+export async function requireFreeTierCapacity(request: Request, env: UsageEnv & { NOTES: R2Bucket }) {
+  if (new URL(request.url).pathname === '/api/health')
     return null
+
+  if (isLocalRequest(request)) {
+    if (!isMutation(request)) return null
+    try {
+      const usage = await getLocalStorageUsage(env.NOTES)
+      return usage.usedBytes >= usage.cutoffBytes ? limitError('r2_storage') : null
+    }
+    catch {
+      return error('usage_unavailable', 503)
+    }
+  }
 
   if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_USAGE_TOKEN)
     return error('usage_not_configured', 500)
@@ -63,12 +104,7 @@ export async function requireFreeTierCapacity(request: Request, env: UsageEnv) {
   try {
     const usage = await getUsage(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_USAGE_TOKEN)
     const limit = blockedLimit(request, usage)
-    return limit
-      ? Response.json(
-          { error: 'free_tier_limit_near', limit },
-          { status: 503, headers: { 'Cache-Control': 'no-store' } },
-        )
-      : null
+    return limit ? limitError(limit) : null
   }
   catch {
     return error('usage_unavailable', 503)
@@ -79,7 +115,7 @@ export function blockedLimit(request: Request, usage: Usage) {
   const path = new URL(request.url).pathname
   const sync = request.method === 'GET' && path === '/api/sync'
   const readNote = request.method === 'GET' && path.startsWith('/api/notes/')
-  const mutation = (request.method === 'PUT' || request.method === 'DELETE') && path.startsWith('/api/notes/')
+  const mutation = isMutation(request)
 
   if ((sync || mutation) && usage.d1RowsRead >= limits.d1RowsRead * CUTOFF)
     return 'd1_rows_read'
@@ -96,6 +132,31 @@ export function blockedLimit(request: Request, usage: Usage) {
   if (mutation && usage.r2StorageBytes >= limits.r2StorageBytes * CUTOFF)
     return 'r2_storage'
   return null
+}
+
+async function getLocalStorageUsage(bucket: R2Bucket): Promise<StorageUsage> {
+  let usedBytes = 0
+  let cursor: string | undefined
+  do {
+    const page = await bucket.list(cursor ? { cursor } : {})
+    usedBytes += page.objects.reduce((total, object) => total + object.size, 0)
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+
+  const limitBytes = DEFAULT_DEV_R2_STORAGE_LIMIT_BYTES
+  return { usedBytes, limitBytes, cutoffBytes: limitBytes * CUTOFF }
+}
+
+function isMutation(request: Request) {
+  const path = new URL(request.url).pathname
+  return (request.method === 'PUT' || request.method === 'DELETE') && path.startsWith('/api/notes/')
+}
+
+function limitError(limit: string) {
+  return Response.json(
+    { error: 'free_tier_limit_near', limit },
+    { status: 503, headers: { 'Cache-Control': 'no-store' } },
+  )
 }
 
 async function getUsage(accountId: string, token: string) {
@@ -213,11 +274,6 @@ function storageBytes(metrics?: R2StorageClass) {
     + (metrics?.published?.metadataSize ?? 0)
     + (metrics?.uploaded?.payloadSize ?? 0)
     + (metrics?.uploaded?.metadataSize ?? 0)
-}
-
-function isLocal(request: Request) {
-  const hostname = new URL(request.url).hostname
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 }
 
 function error(message: string, status: number) {

@@ -8,26 +8,28 @@ import {
   PencilSquareIcon,
   SignalSlashIcon,
 } from '@heroicons/vue/24/outline'
-import { IconDatabaseX, IconEye, IconFileTypeHtml, IconMarkdown, IconTrash } from '@tabler/icons-vue'
-import { useOnline, useStorage, useSwipe } from '@vueuse/core'
-import type { Component } from 'vue'
-import { computed, ref, watch } from 'vue'
+import { IconDatabaseX, IconEye, IconFileTypeHtml, IconMarkdown, IconPaperclip, IconTrash } from '@tabler/icons-vue'
+import { useFileDialog, useOnline, useStorage, useSwipe } from '@vueuse/core'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import EditorModeToggle from './components/EditorModeToggle.vue'
-import IconTextPopupMenu from './components/IconTextPopupMenu.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import NoteList from './components/NoteList.vue'
+import NoteResources from './components/NoteResources.vue'
+import PopupMenu, { type PopupMenuItem } from './components/PopupMenu.vue'
 import { exportHtml, exportMarkdown, exportMarkdownWithMetadata, renderHtml } from './editor/exportNote'
-import { noteTitle } from './notePresentation'
+import { noteTitle } from './presentation'
 import { useNoteRoute } from './noteRoute'
 import { useNotesStore } from './stores/notes'
 
 const notes = useNotesStore()
 const { openNote: openNoteRoute } = useNoteRoute(notes)
 const online = useOnline()
-const editorScreen = ref<HTMLElement | null>(null)
+const editorScreen = useTemplateRef<HTMLElement>('editorScreen')
+const noteEditor = useTemplateRef<InstanceType<typeof NoteEditor>>('noteEditor')
 const showNoteList = useStorage('plain-note:show-note-list', !notes.selectedId)
 const previewMode = useStorage('plain-note:preview-mode', false)
 const htmlExportPreview = ref(false)
+const fileDialog = useFileDialog({ multiple: true, reset: true })
 let swipeFromEdge = false
 const sync = () => void notes.sync()
 const createNote = () => {
@@ -43,6 +45,9 @@ const showImportedNote = () => {
   showNoteList.value = false
   previewMode.value = false
 }
+fileDialog.onChange((files) => {
+  if (files?.length) noteEditor.value?.attachFiles(Array.from(files))
+})
 useSwipe(editorScreen, {
   threshold: 80,
   onSwipeStart: (event) => {
@@ -85,9 +90,7 @@ const exportSelectedHtml = (): void => {
 const toggleHtmlExportPreview = (): void => {
   htmlExportPreview.value = !htmlExportPreview.value
 }
-const noteMenuItems = computed<
-  { icon: Component; label: string; action: () => void; disabled?: boolean; destructive?: boolean }[]
->(() => [
+const noteMenuItems = computed<PopupMenuItem[]>(() => [
   { icon: IconMarkdown, label: 'Export Markdown', action: exportSelectedMarkdown },
   {
     icon: IconMarkdown,
@@ -152,12 +155,23 @@ watch(online, (isOnline) => {
             </button>
           </div>
           <div class="flex items-center gap-2">
+            <button
+              v-if="!previewMode"
+              class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-200 sm:hidden"
+              type="button"
+              title="Attach files"
+              @click="fileDialog.open()"
+            >
+              <IconPaperclip class="size-5" />
+            </button>
+            <NoteResources @remove="noteEditor?.removeResource($event)" />
             <EditorModeToggle v-model="previewMode" />
-            <IconTextPopupMenu :items="noteMenuItems" />
+            <PopupMenu :items="noteMenuItems" />
           </div>
         </header>
         <div class="min-h-0 flex-1 md:absolute md:inset-0" :class="{ 'grid grid-rows-2': htmlExportPreview }">
           <NoteEditor
+            ref="noteEditor"
             class="h-full min-h-0 min-w-0 overflow-y-auto"
             :document-id="notes.selectedNote.id"
             :editable="!previewMode"
@@ -178,7 +192,7 @@ watch(online, (isOnline) => {
           <span class="hidden sm:inline">
             {{ characterCount }} {{ characterCount === 1 ? 'character' : 'characters' }}
           </span>
-          <span role="status" :title="notes.syncMessage">
+          <span v-tooltip="notes.syncMessage" role="status">
             <SignalSlashIcon v-if="!online" class="size-5 text-stone-400" />
             <ArrowPathIcon v-else-if="notes.syncing" class="size-5 text-blue-500" />
             <ExclamationCircleIcon

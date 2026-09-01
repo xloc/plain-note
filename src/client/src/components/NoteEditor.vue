@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
+import { Fragment } from 'prosemirror-model'
 import { baseKeymap, chainCommands, setBlockType, toggleMark } from 'prosemirror-commands'
 import { gapCursor } from 'prosemirror-gapcursor'
 import { history, redo, undo } from 'prosemirror-history'
@@ -9,17 +10,31 @@ import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-li
 import { type Command, EditorState, NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tableEditing } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
+import type { NoteResource } from '../../../shared/note'
 import { autoLinks } from '../editor/autoLinks'
 import { DetailsView } from '../editor/DetailsView'
-import { markdownParser, markdownSerializer, schema, tabCharacter } from '../editor/markdown'
+import {
+  containsFiles,
+  type FileInsertionPoint,
+  fileInsertionPoint,
+  insertTransferredContent,
+  transferredFiles,
+} from '../editor/fileTransfer'
+import { ImageView } from '../editor/ImageView'
+import { imageResourceId, markdownParser, markdownSerializer, schema, tabCharacter } from '../editor/markdown'
 import { RecentScrollPositions } from '../editor/RecentScrollPositions'
+import { ResourceView } from '../editor/ResourceView'
 import { TableView } from '../editor/TableView'
+import { trailingParagraph, withTrailingParagraph, withoutTrailingParagraph } from '../editor/trailingParagraph'
+import { useNotesStore } from '../stores/notes'
 
 const props = withDefaults(defineProps<{ documentId: string; modelValue: string; editable?: boolean }>(), {
   editable: true,
 })
 const emit = defineEmits<{ 'update:modelValue': [content: string] }>()
+const notes = useNotesStore()
+const currentNote = computed(() => notes.notes.find((note) => note.id === props.documentId))
 const {
   blockquote,
   bullet_list: bulletList,
@@ -36,7 +51,9 @@ const { code, link } = schema.marks
 const codeIndentation = ' '.repeat(4)
 const scrollPositions = new RecentScrollPositions()
 
-const editor = ref<HTMLElement | null>(null)
+const editor = useTemplateRef<HTMLElement>('editor')
+const resourceViews = new Set<ResourceView>()
+const imageViews = new Set<ImageView>()
 let view: EditorView | undefined
 
 function saveScrollPosition() {
@@ -226,11 +243,12 @@ function plugins() {
     autoLinks,
     tableEditing(),
     gapCursor(),
+    trailingParagraph,
   ]
 }
 
 function markdown() {
-  return view ? markdownSerializer.serialize(view.state.doc) : ''
+  return view ? markdownSerializer.serialize(withoutTrailingParagraph(view.state.doc)) : ''
 }
 
 function focusEnd(event: MouseEvent) {
@@ -241,16 +259,149 @@ function focusEnd(event: MouseEvent) {
   view.focus()
 }
 
+function selectedResource(id: string) {
+  return currentNote.value?.resources.find((resource) => resource.id === id)
+}
+
+function resourceNode(resource: NoteResource) {
+  if (resource.mime.startsWith('image/')) {
+    return schema.nodes.image.create({
+      src: `resource:${resource.id}`,
+      alt: resource.name,
+      title: null,
+      width: null,
+    })
+  }
+  return schema.nodes.resource.create({
+    id: resource.id,
+    name: resource.name,
+  })
+}
+
+async function insertFiles(
+  files: File[],
+  insertion: FileInsertionPoint,
+  documentId = props.documentId,
+) {
+  const resources = await notes.addResources(documentId, files)
+  if (!resources?.length || !view || props.documentId !== documentId) return
+
+  const content = Fragment.fromArray(resources.map(resourceNode))
+  const transaction = insertTransferredContent(view.state.tr, insertion, content)
+  view.dispatch(transaction.scrollIntoView())
+  view.focus()
+}
+
+function pastedImageFiles(html: string) {
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  return Promise.all(
+    [...parsed.querySelectorAll<HTMLImageElement>('img[src^="data:"]')].map(async (image, index) => {
+      const blob = await fetch(image.src).then((response) => response.blob())
+      const extension = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
+      return new File([blob], `pasted-image-${Date.now()}-${index + 1}.${extension}`, { type: blob.type })
+    }),
+  )
+}
+
+function handlePaste(editorView: EditorView, event: ClipboardEvent) {
+  const files = transferredFiles(event.clipboardData)
+  const insertion = fileInsertionPoint(editorView.state.selection)
+  if (files.length) {
+    event.preventDefault()
+    void insertFiles(files, insertion)
+    return true
+  }
+
+  const html = event.clipboardData?.getData('text/html') ?? ''
+  if (!/<img\b[^>]*\bsrc=["']data:/i.test(html)) return false
+  event.preventDefault()
+  void pastedImageFiles(html).then((images) => insertFiles(images, insertion))
+  return true
+}
+
+function handleFileDrag(event: DragEvent) {
+  if (!containsFiles(event.dataTransfer)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = props.editable ? 'copy' : 'none'
+}
+
+function handleFileDrop(event: DragEvent) {
+  if (!containsFiles(event.dataTransfer)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const files = transferredFiles(event.dataTransfer)
+  if (props.editable && files.length && view) void insertFiles(files, fileInsertionPoint(view.state.selection))
+}
+
+function attachFiles(files: File[]) {
+  if (props.editable && files.length && view) void insertFiles(files, fileInsertionPoint(view.state.selection))
+}
+
+async function removeResource(id: string) {
+  if (view) {
+    const positions: number[] = []
+    view.state.doc.descendants((node, position) => {
+      const resourceFile = node.type === schema.nodes.resource && node.attrs.id === id
+      const resourceImage = node.type === schema.nodes.image && imageResourceId(node.attrs.src) === id
+      if (resourceFile || resourceImage) positions.push(position)
+    })
+    if (positions.length) {
+      const transaction = view.state.tr
+      for (const position of positions.reverse()) {
+        transaction.delete(position, position + transaction.doc.nodeAt(position)!.nodeSize)
+      }
+      view.dispatch(transaction)
+    }
+  }
+  await notes.removeResource(props.documentId, id)
+}
+
+defineExpose({ attachFiles, removeResource })
+
 onMounted(() => {
   view = new EditorView(editor.value!, {
     attributes: { class: 'px-4 py-2 md:pt-[var(--editor-header-space)] outline-none' },
     editable: () => props.editable,
     nodeViews: {
       details: (node, view, getPos) => new DetailsView(node, view, getPos),
+      image: (node, editorView, getPos) => {
+        const imageView = new ImageView(node, editorView, getPos, {
+          resource: selectedResource,
+          progress: (id) => notes.resourceProgress[id],
+          load: (resource) => notes.getResourceBlob(props.documentId, resource),
+          download: (resource) => void notes.downloadResource(props.documentId, resource),
+          removeResource: (id) => void removeResource(id),
+          editable: () => props.editable,
+          destroy: (imageView) => imageViews.delete(imageView),
+        })
+        imageViews.add(imageView)
+        return imageView
+      },
+      resource: (node, editorView, getPos) => {
+        const resourceView = new ResourceView(node, editorView, getPos, {
+          resource: selectedResource,
+          progress: (id) => notes.resourceProgress[id],
+          download: (resource) => void notes.downloadResource(props.documentId, resource),
+          remove: (id) => void removeResource(id),
+          editable: () => props.editable,
+          destroy: (resourceView) => resourceViews.delete(resourceView),
+        })
+        resourceViews.add(resourceView)
+        return resourceView
+      },
       table: (node, view, getPos) => new TableView(node, view, getPos),
     },
+    handleDOMEvents: {
+      dragstart(editorView, event) {
+        // ProseMirror leaves draggable nodes active in read-only mode, which produces a drag ghost.
+        if (editorView.editable) return false
+        event.preventDefault()
+        return true
+      },
+    },
+    handlePaste,
     state: EditorState.create({
-      doc: markdownParser.parse(props.modelValue),
+      doc: withTrailingParagraph(markdownParser.parse(props.modelValue)),
       plugins: plugins(),
     }),
     dispatchTransaction(transaction) {
@@ -269,16 +420,26 @@ watch(
     if (!view || content === markdown()) return
     view.updateState(
       EditorState.create({
-        doc: markdownParser.parse(content),
+        doc: withTrailingParagraph(markdownParser.parse(content)),
         plugins: plugins(),
       }),
     )
   },
 )
 watch(
+  [() => currentNote.value?.resources, () => notes.resourceProgress],
+  () => {
+    resourceViews.forEach((resourceView) => resourceView.refresh())
+    imageViews.forEach((imageView) => imageView.refresh())
+  },
+  { deep: true },
+)
+watch(
   () => props.editable,
   (editable) => {
     view?.setProps({ editable: () => editable })
+    resourceViews.forEach((resourceView) => resourceView.refresh())
+    imageViews.forEach((imageView) => imageView.refresh())
     if (!editable) view?.dom.blur()
   },
 )
@@ -302,7 +463,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="editor" class="editor-scroll" @click="focusEnd" @scroll.passive="saveScrollPosition" />
+  <div
+    ref="editor"
+    class="editor-scroll"
+    @click="focusEnd"
+    @dragenter="handleFileDrag"
+    @dragover="handleFileDrag"
+    @drop.capture="handleFileDrop"
+    @scroll.passive="saveScrollPosition"
+  />
 </template>
 
 <style scoped>
@@ -391,6 +560,10 @@ onBeforeUnmount(() => {
   border-top: 1px solid currentColor;
   content: '';
   width: 100%;
+}
+
+:deep(.ProseMirror .ProseMirror-selectednode > hr) {
+  background: var(--color-violet-100);
 }
 
 :deep(.ProseMirror li p) {
@@ -488,6 +661,7 @@ onBeforeUnmount(() => {
   margin: calc(2 * var(--spacing)) 0;
   overflow: hidden;
   font-size: 1.2rem;
+  position: relative;
 }
 
 :deep(.ProseMirror h1::after),
@@ -500,10 +674,25 @@ onBeforeUnmount(() => {
     calc(100% - 1rem - var(--heading-label-line-gap)) 1px no-repeat;
   display: inline-block;
   margin-left: calc(2 * var(--spacing));
-  margin-right: -100%;
+  /* Reserve space for the label while letting the decorative line fill the remaining width. */
+  margin-right: calc(-100% + 1rem);
   opacity: 0.5;
   vertical-align: middle;
   width: 100%;
+}
+
+/* ProseMirror ends an empty heading with a <br>; take the label out of flow so it stays on that line. */
+:deep(.ProseMirror h1:has(> br.ProseMirror-trailingBreak:only-child)::after),
+:deep(.ProseMirror h2:has(> br.ProseMirror-trailingBreak:only-child)::after),
+:deep(.ProseMirror h3:has(> br.ProseMirror-trailingBreak:only-child)::after),
+:deep(.ProseMirror h4:has(> br.ProseMirror-trailingBreak:only-child)::after),
+:deep(.ProseMirror h5:has(> br.ProseMirror-trailingBreak:only-child)::after),
+:deep(.ProseMirror h6:has(> br.ProseMirror-trailingBreak:only-child)::after) {
+  left: 0;
+  margin: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 :deep(.ProseMirror h1::after),

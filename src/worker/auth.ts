@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
+import { isLocalRequest } from './environment.ts'
 
 export type AuthEnv = {
   POLICY_AUD?: string
@@ -8,7 +9,7 @@ export type AuthEnv = {
 const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
 
 export async function requireAccess(request: Request, env: AuthEnv) {
-  if (isLocal(request))
+  if (isLocalRequest(request))
     return null
 
   if (!env.POLICY_AUD || !env.TEAM_DOMAIN)
@@ -34,11 +35,6 @@ export async function requireAccess(request: Request, env: AuthEnv) {
   catch {
     return error('unauthorized', 401)
   }
-}
-
-function isLocal(request: Request) {
-  const hostname = new URL(request.url).hostname
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 }
 
 function error(message: string, status: number) {

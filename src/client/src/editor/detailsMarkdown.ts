@@ -37,7 +37,7 @@ export function detailsAsBlockquotes(markdown: string) {
 export function detailsFromBlockquote(
   node: ProseMirrorNode,
   schema: Schema,
-  convertNode: (node: ProseMirrorNode) => ProseMirrorNode,
+  convertNode: (node: ProseMirrorNode) => ProseMirrorNode[],
 ) {
   if (node.type.name !== 'blockquote') return
 
@@ -57,11 +57,11 @@ export function detailsFromBlockquote(
         summaryContent.push(schema.text(text, marks))
       }
     } else {
-      summaryContent.push(convertNode(child))
+      summaryContent.push(...convertNode(child))
     }
   })
   node.forEach((child, _, index) => {
-    if (index) body.push(convertNode(child))
+    if (index) body.push(...convertNode(child))
   })
   return schema.nodes.details.create({ open }, [schema.nodes.details_summary.create(null, summaryContent), ...body])
 }

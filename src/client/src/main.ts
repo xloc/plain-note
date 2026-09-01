@@ -2,9 +2,10 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import './style.css'
 import Root from './Root.vue'
+import { tooltip } from './directives/tooltip'
 import { router } from './router'
 
-createApp(Root).use(createPinia()).use(router).mount('#app')
+createApp(Root).use(createPinia()).use(router).directive('tooltip', tooltip).mount('#app')
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
