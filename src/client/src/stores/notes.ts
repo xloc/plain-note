@@ -3,16 +3,8 @@ import { defineStore } from 'pinia'
 import { v4 as randomUUID } from 'uuid'
 import { computed, ref, toRaw } from 'vue'
 import type { Change, Note, NoteRecord, NoteResource, Tombstone } from '../../../shared/note'
+import * as api from '../api'
 import { referencedResourceIds } from '../editor/markdown'
-import {
-  ApiConflict,
-  deleteNote,
-  getChanges,
-  getNote,
-  getResource as getRemoteResource,
-  putNote,
-  putResource as putRemoteResource,
-} from '../api'
 import {
   clearLocalData,
   getMeta,
@@ -236,13 +228,13 @@ export const useNotesStore = defineStore('notes', () => {
     const local = await getStoredResource(noteId, resource.id)
     if (local) return local.blob
 
-    const blob = await getRemoteResource(noteId, resource.id)
+    const blob = await api.getResource(noteId, resource.id)
     await saveStoredResource({ ...resource, noteId, blob, syncState: 'synced' })
     return blob
   }
 
-  async function deleteSelected() {
-    const note = selectedNote.value
+  async function deleteNote(id: string) {
+    const note = notes.value.find((candidate) => candidate.id === id && !candidate.deleted)
     if (!note || note.deleted) return
     if (note.base === null) {
       await removeLocalNote(note.id)
@@ -255,11 +247,15 @@ export const useNotesStore = defineStore('notes', () => {
       })
       await saveNote(note)
     }
-    selectFirstNote()
-    if (!selectedId.value) {
-      await createNote()
+    if (selectedId.value === note.id) {
+      selectFirstNote()
+      if (!selectedId.value) await createNote()
     }
     scheduleSync()
+  }
+
+  async function deleteSelected() {
+    if (selectedId.value) await deleteNote(selectedId.value)
   }
 
   function select(id: string) {
@@ -323,7 +319,7 @@ export const useNotesStore = defineStore('notes', () => {
               throw new Error('A server-backed note is missing its base snapshot')
             }
 
-            const { tombstone } = await deleteNote(candidate.id, {
+            const { tombstone } = await api.deleteNote(candidate.id, {
               baseRevision: candidate.base.revision,
               revision,
               updatedAt: candidate.updatedAt,
@@ -338,7 +334,7 @@ export const useNotesStore = defineStore('notes', () => {
           } else {
             const sent = toNote(candidate)
             await pushResources(candidate.id, sent.resources)
-            const { note: stored } = await putNote({
+            const { note: stored } = await api.putNote({
               baseRevision: candidate.base?.revision ?? null,
               note: sent,
             })
@@ -354,7 +350,7 @@ export const useNotesStore = defineStore('notes', () => {
           }
           break
         } catch (error) {
-          if (!(error instanceof ApiConflict)) throw error
+          if (!(error instanceof api.ApiConflict)) throw error
 
           const current = notes.value.find((note) => note.id === candidate.id)
           if (!current) break
@@ -369,13 +365,13 @@ export const useNotesStore = defineStore('notes', () => {
     for (const resource of resources) {
       let local = await getStoredResource(noteId, resource.id)
       if (!local) {
-        const blob = await getRemoteResource(noteId, resource.id)
+        const blob = await api.getResource(noteId, resource.id)
         local = { ...resource, noteId, blob, syncState: 'synced' }
         await saveStoredResource(local)
       }
       if (local.syncState === 'pending') {
         resourceProgress.value[resource.id] = 0
-        await putRemoteResource(noteId, resource, local.blob, (progress) => {
+        await api.putResource(noteId, resource, local.blob, (progress) => {
           resourceProgress.value[resource.id] = progress
         })
       }
@@ -395,7 +391,7 @@ export const useNotesStore = defineStore('notes', () => {
       }
       for (const resource of note.resources) {
         if (await getStoredResource(note.id, resource.id)) continue
-        const blob = await getRemoteResource(note.id, resource.id)
+        const blob = await api.getResource(note.id, resource.id)
         await saveStoredResource({ ...resource, noteId: note.id, blob, syncState: 'synced' })
       }
     }
@@ -407,7 +403,7 @@ export const useNotesStore = defineStore('notes', () => {
     let firstPage = true
 
     while (true) {
-      const response = await getChanges(generation, cursor)
+      const response = await api.getChanges(generation, cursor)
       if (response.reset && firstPage) {
         const serverIds = new Set(response.changes.map((change) => change.id))
         const obsolete = notes.value.filter((note) => note.syncState === 'synced' && !serverIds.has(note.id))
@@ -466,11 +462,11 @@ export const useNotesStore = defineStore('notes', () => {
 
     if (local?.syncState === 'pending') {
       if (local.base?.revision === change.revision) return
-      await mergeConflict(local, (await getNote(change.id)).note)
+      await mergeConflict(local, (await api.getNote(change.id)).note)
       return
     }
 
-    const remote = (await getNote(change.id)).note
+    const remote = (await api.getNote(change.id)).note
     await replaceLocalNote(fromRemote(remote))
   }
 
@@ -549,6 +545,7 @@ export const useNotesStore = defineStore('notes', () => {
     removeResource,
     downloadResource,
     getResourceBlob,
+    deleteNote,
     deleteSelected,
     select,
     resetLocalData,

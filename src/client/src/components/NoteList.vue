@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { PencilSquareIcon } from '@heroicons/vue/24/outline'
 import { useDropZone } from '@vueuse/core'
-import { computed, nextTick, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { parseMarkdownImport } from '../editor/exportNote'
-import { formatDateTime, groupNotesByUpdatedAt, notePreview, noteTitle } from '../presentation'
+import { groupNotesByUpdatedAt } from '../presentation'
 import { useNotesStore } from '../stores/notes'
+import NoteListItem from './NoteListItem.vue'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{
@@ -17,6 +18,17 @@ const notes = useNotesStore()
 const noteList = useTemplateRef<HTMLElement>('noteList')
 const noteNav = useTemplateRef<HTMLElement>('noteNav')
 const noteSections = computed(() => groupNotesByUpdatedAt(notes.activeNotes))
+const revealedNoteId = ref<string>()
+
+function openNote(id: string) {
+  revealedNoteId.value = undefined
+  emit('open', id)
+}
+
+function deleteNote(id: string) {
+  revealedNoteId.value = undefined
+  void notes.deleteNote(id)
+}
 
 const { isOverDropZone } = useDropZone(noteList, {
   async onDrop(files) {
@@ -59,27 +71,17 @@ watch(
         <section class="flex flex-col gap-2" v-for="section in noteSections" :key="section.label">
           <h2 class="px-2 text-xl font-semibold md:text-base">{{ section.label }}</h2>
           <div class="overflow-hidden rounded-xl bg-white">
-            <button
-              class="block w-full border-b border-stone-200 px-4 py-2 text-start last:border-b-0 md:hover:bg-violet-100"
-              :class="{ 'md:bg-violet-100': note.id === notes.selectedId }"
+            <NoteListItem
               v-for="note in section.notes"
               :key="note.id"
-              type="button"
-              @click="emit('open', note.id)"
-            >
-              <!-- title -->
-              <div class="flex">
-                <div class="min-w-0 flex-1 truncate text-lg font-semibold text-stone-800 md:text-base">
-                  {{ noteTitle(note.content) }}
-                </div>
-                <div class="shrink-0" v-if="note.syncState !== 'synced'">({{ note.syncState }})</div>
-              </div>
-              <!-- preview -->
-              <div class="flex gap-2 text-sm text-stone-500 md:text-xs">
-                <span class="shrink-0">{{ formatDateTime(note.updatedAt) }}</span>
-                <span class="truncate">{{ notePreview(note.content) }}</span>
-              </div>
-            </button>
+              :note="note"
+              :selected="note.id === notes.selectedId"
+              :revealed="note.id === revealedNoteId"
+              @close="revealedNoteId = undefined"
+              @delete="deleteNote(note.id)"
+              @open="openNote(note.id)"
+              @reveal="revealedNoteId = note.id"
+            />
           </div>
         </section>
       </nav>
