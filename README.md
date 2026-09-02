@@ -25,9 +25,12 @@ Useful checks:
 pnpm build
 pnpm typecheck
 pnpm smoke
+pnpm e2e
 ```
 
 The smoke test expects the local Worker to be running.
+
+End-to-end test and demo instructions are in [e2e/README.md](e2e/README.md).
 
 ## Cloudflare deployment
 

@@ -1,9 +1,10 @@
-import { defineConfig } from 'vite-plus'
+import { defineConfig, loadEnv } from 'vite-plus'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ mode }) => {
   const devPrefix = mode === 'development' ? 'dev-' : ''
+  const apiOrigin = loadEnv(mode, '.', '').PLAIN_NOTE_API_ORIGIN || 'http://localhost:8787'
 
   return {
     plugins: [
@@ -18,7 +19,7 @@ export default defineConfig(({ mode }) => {
       host: true,
       proxy: {
         '/api': {
-          target: 'http://localhost:8787',
+          target: apiOrigin,
           changeOrigin: true,
         },
       },
