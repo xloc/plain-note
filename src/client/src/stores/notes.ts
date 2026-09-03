@@ -4,21 +4,8 @@ import { v4 as randomUUID } from 'uuid'
 import { computed, ref, toRaw } from 'vue'
 import type { Change, Note, NoteRecord, NoteResource, Tombstone } from '../../../shared/note'
 import * as api from '../api'
+import * as db from '../db'
 import { referencedResourceIds } from '../editor/markdown'
-import {
-  clearLocalData,
-  getMeta,
-  getResource as getStoredResource,
-  loadNotes,
-  loadResources,
-  removeNote as removeStoredNote,
-  removeNoteResources,
-  removeResource as removeStoredResource,
-  saveNote as saveStoredNote,
-  saveResource as saveStoredResource,
-  setMeta,
-  type LocalNote,
-} from '../db'
 import { mergeResources } from './mergeResources'
 import { mergeMarkdown } from './mergeMarkdown'
 import { copyNote, copyRecord, fromRemote, toNote } from './noteRecords'
@@ -26,21 +13,21 @@ import { copyNote, copyRecord, fromRemote, toNote } from './noteRecords'
 type NewNote = Pick<Note, 'content' | 'tags' | 'resources' | 'createdAt' | 'updatedAt'>
 
 export const useNotesStore = defineStore('notes', () => {
-  const notes = ref<LocalNote[]>([])
+  const notes = ref<db.LocalNote[]>([])
   const selectedId = useStorage<string | null>('plain-note:selected-note-id', null)
   const ready = ref(false)
   const syncing = ref(false)
   const syncMessage = ref('Local only')
+  const syncRequest = ref(0)
   const resourceProgress = ref<Record<string, number>>({})
-  let syncTimer: number | undefined
 
   const activeNotes = computed(() =>
     notes.value.filter((note) => !note.deleted).sort((a, b) => b.updatedAt - a.updatedAt),
   )
   const selectedNote = computed(() => notes.value.find((note) => note.id === selectedId.value && !note.deleted))
 
-  function saveNote(note: LocalNote) {
-    return saveStoredNote({
+  function saveNote(note: db.LocalNote) {
+    return db.saveNote({
       ...toRaw(note),
       tags: [...note.tags],
       resources: note.resources.map((resource) => ({ ...resource })),
@@ -48,7 +35,7 @@ export const useNotesStore = defineStore('notes', () => {
     })
   }
 
-  function keepReferencedResources(note: LocalNote, content = note.content) {
+  function keepReferencedResources(note: db.LocalNote, content = note.content) {
     const referenced = referencedResourceIds(content)
     const resources = note.resources.filter((resource) => referenced.has(resource.id))
     if (resources.length === note.resources.length) return false
@@ -61,7 +48,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function addNote(source: NewNote) {
     const referenced = referencedResourceIds(source.content)
-    const note: LocalNote = {
+    const note: db.LocalNote = {
       ...source,
       id: randomUUID(),
       tags: [...source.tags],
@@ -76,15 +63,15 @@ export const useNotesStore = defineStore('notes', () => {
     notes.value.push(note)
     selectedId.value = note.id
     await saveNote(note)
-    scheduleSync()
+    notifyLocalChange()
   }
 
   async function removeLocalNote(id: string) {
     notes.value = notes.value.filter((note) => note.id !== id)
-    await Promise.all([removeStoredNote(id), removeNoteResources(id)])
+    await Promise.all([db.removeNote(id), db.removeNoteResources(id)])
   }
 
-  async function replaceLocalNote(note: LocalNote) {
+  async function replaceLocalNote(note: db.LocalNote) {
     if (!note.deleted && keepReferencedResources(note)) {
       Object.assign(note, {
         revision: randomUUID(),
@@ -107,7 +94,7 @@ export const useNotesStore = defineStore('notes', () => {
       return
     }
 
-    notes.value = await loadNotes()
+    notes.value = await db.loadNotes()
     for (const note of notes.value) {
       if (note.deleted || !keepReferencedResources(note)) continue
       Object.assign(note, {
@@ -123,17 +110,13 @@ export const useNotesStore = defineStore('notes', () => {
       selectFirstNote()
     }
     ready.value = true
-    if (!selectedNote.value && navigator.onLine) {
-      await sync()
-    }
     if (!selectedNote.value) {
       selectFirstNote()
     }
     if (!selectedId.value) {
       await createNote()
-    } else if (syncMessage.value === 'Local only') {
-      void sync()
     }
+    notifyLocalChange()
   }
 
   async function createNote() {
@@ -161,7 +144,7 @@ export const useNotesStore = defineStore('notes', () => {
       syncState: 'pending',
     })
     void saveNote(note)
-    scheduleSync()
+    notifyLocalChange()
   }
 
   async function addResources(noteId: string, files: File[]) {
@@ -178,7 +161,7 @@ export const useNotesStore = defineStore('notes', () => {
         createdAt: Date.now(),
       }
       additions.push(resource)
-      await saveStoredResource({
+      await db.saveResource({
         ...resource,
         noteId: note.id,
         blob: file,
@@ -193,7 +176,7 @@ export const useNotesStore = defineStore('notes', () => {
       syncState: 'pending',
     })
     await saveNote(note)
-    scheduleSync()
+    notifyLocalChange()
     return additions
   }
 
@@ -208,7 +191,7 @@ export const useNotesStore = defineStore('notes', () => {
     })
     delete resourceProgress.value[id]
     await saveNote(note)
-    scheduleSync()
+    notifyLocalChange()
   }
 
   async function downloadResource(noteId: string, resource: NoteResource) {
@@ -225,11 +208,11 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function getResourceBlob(noteId: string, resource: NoteResource) {
-    const local = await getStoredResource(noteId, resource.id)
+    const local = await db.getResource(noteId, resource.id)
     if (local) return local.blob
 
     const blob = await api.getResource(noteId, resource.id)
-    await saveStoredResource({ ...resource, noteId, blob, syncState: 'synced' })
+    await db.saveResource({ ...resource, noteId, blob, syncState: 'synced' })
     return blob
   }
 
@@ -251,7 +234,7 @@ export const useNotesStore = defineStore('notes', () => {
       selectFirstNote()
       if (!selectedId.value) await createNote()
     }
-    scheduleSync()
+    notifyLocalChange()
   }
 
   async function deleteSelected() {
@@ -262,30 +245,27 @@ export const useNotesStore = defineStore('notes', () => {
     selectedId.value = id
   }
 
-  function scheduleSync() {
-    window.clearTimeout(syncTimer)
-    syncTimer = window.setTimeout(() => void sync(), 700)
+  function notifyLocalChange() {
+    // Touch this value to trigger the cloud sync store's watcher; the value itself has no meaning.
+    syncRequest.value++
   }
 
   async function resetLocalData() {
-    if (syncing.value) return
-    if (!navigator.onLine) {
-      syncMessage.value = 'Go online to reset local data'
-      return
-    }
-
-    window.clearTimeout(syncTimer)
-    await clearLocalData()
+    await db.clearLocalData()
     notes.value = []
     selectedId.value = null
-    await sync()
-    if (!selectedId.value && syncMessage.value === 'Synced') {
+    syncMessage.value = 'Local only'
+  }
+
+  async function ensureNote() {
+    if (!selectedNote.value) selectFirstNote()
+    if (!selectedId.value) {
       await createNote()
     }
   }
 
   async function sync() {
-    if (syncing.value || !navigator.onLine) return
+    if (syncing.value) return
     syncing.value = true
     syncMessage.value = 'Syncing'
     try {
@@ -294,12 +274,13 @@ export const useNotesStore = defineStore('notes', () => {
       await syncResources()
       if (notes.value.some((note) => note.syncState === 'pending')) {
         syncMessage.value = 'Pending'
-        scheduleSync()
+        notifyLocalChange()
       } else {
         syncMessage.value = 'Synced'
       }
     } catch (error) {
       syncMessage.value = error instanceof Error ? error.message : 'Sync failed'
+      throw error
     } finally {
       syncing.value = false
     }
@@ -363,11 +344,11 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function pushResources(noteId: string, resources: NoteResource[]) {
     for (const resource of resources) {
-      let local = await getStoredResource(noteId, resource.id)
+      let local = await db.getResource(noteId, resource.id)
       if (!local) {
         const blob = await api.getResource(noteId, resource.id)
         local = { ...resource, noteId, blob, syncState: 'synced' }
-        await saveStoredResource(local)
+        await db.saveResource(local)
       }
       if (local.syncState === 'pending') {
         resourceProgress.value[resource.id] = 0
@@ -381,25 +362,25 @@ export const useNotesStore = defineStore('notes', () => {
   async function syncResources() {
     for (const note of notes.value.filter((note) => !note.deleted)) {
       const desired = new Set(note.resources.map((resource) => resource.id))
-      for (const local of await loadResources(note.id)) {
+      for (const local of await db.loadResources(note.id)) {
         if (!desired.has(local.id)) {
-          await removeStoredResource(note.id, local.id)
+          await db.removeResource(note.id, local.id)
         } else if (note.syncState === 'synced' && local.syncState === 'pending') {
           local.syncState = 'synced'
-          await saveStoredResource(local)
+          await db.saveResource(local)
         }
       }
       for (const resource of note.resources) {
-        if (await getStoredResource(note.id, resource.id)) continue
+        if (await db.getResource(note.id, resource.id)) continue
         const blob = await api.getResource(note.id, resource.id)
-        await saveStoredResource({ ...resource, noteId: note.id, blob, syncState: 'synced' })
+        await db.saveResource({ ...resource, noteId: note.id, blob, syncState: 'synced' })
       }
     }
   }
 
   async function pullChanges() {
-    let generation = String((await getMeta('generation')) ?? '') || null
-    let cursor = Number((await getMeta('cursor')) ?? 0)
+    let generation = String((await db.getMeta('generation')) ?? '') || null
+    let cursor = Number((await db.getMeta('cursor')) ?? 0)
     let firstPage = true
 
     while (true) {
@@ -417,8 +398,8 @@ export const useNotesStore = defineStore('notes', () => {
 
       generation = response.generation
       cursor = response.cursor
-      await setMeta('generation', generation)
-      await setMeta('cursor', cursor)
+      await db.setMeta('generation', generation)
+      await db.setMeta('cursor', cursor)
 
       if (response.reset) {
         firstPage = false
@@ -470,7 +451,7 @@ export const useNotesStore = defineStore('notes', () => {
     await replaceLocalNote(fromRemote(remote))
   }
 
-  async function mergeConflict(local: LocalNote, remote: NoteRecord) {
+  async function mergeConflict(local: db.LocalNote, remote: NoteRecord) {
     if (!local.base) {
       throw new Error('A server-backed note is missing its base snapshot')
     }
@@ -511,19 +492,19 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function markResourcesPending(noteId: string, resources: NoteResource[]) {
     for (const resource of resources) {
-      const local = await getStoredResource(noteId, resource.id)
+      const local = await db.getResource(noteId, resource.id)
       if (!local) continue
       local.syncState = 'pending'
-      await saveStoredResource(local)
+      await db.saveResource(local)
     }
   }
 
   async function markResourcesSynced(noteId: string, resources: NoteResource[]) {
     for (const resource of resources) {
-      const local = await getStoredResource(noteId, resource.id)
+      const local = await db.getResource(noteId, resource.id)
       if (!local) continue
       local.syncState = 'synced'
-      await saveStoredResource(local)
+      await db.saveResource(local)
       delete resourceProgress.value[resource.id]
     }
   }
@@ -534,6 +515,7 @@ export const useNotesStore = defineStore('notes', () => {
     ready,
     syncing,
     syncMessage,
+    syncRequest,
     resourceProgress,
     activeNotes,
     selectedNote,
@@ -549,6 +531,7 @@ export const useNotesStore = defineStore('notes', () => {
     deleteSelected,
     select,
     resetLocalData,
+    ensureNote,
     sync,
   }
 })

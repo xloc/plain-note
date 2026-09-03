@@ -74,7 +74,7 @@ class DB {
 
 test('uploads and downloads an immutable resource by UUID', async () => {
   const bucket = new Bucket()
-  const env = { NOTES: bucket }
+  const env = { NOTES: bucket, TEST_AUTH_BYPASS: true }
   const url = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
 
   const upload = await worker.fetch(
@@ -162,15 +162,19 @@ test('cleans up expired unreferenced uploads', async () => {
 test('scheduled cleanup removes expired orphans and preserves referenced and fresh resources', async () => {
   const bucket = new Bucket()
   const resource = { id: 'referenced-id', name: 'kept.txt', mime: 'text/plain', size: 4, createdAt: 1 }
-  await putNote(bucket, {
-    id: 'note-id',
-    content: '',
-    tags: [],
-    resources: [resource],
-    createdAt: 1,
-    updatedAt: 1,
-    revision: 'revision-1',
-  }, null)
+  await putNote(
+    bucket,
+    {
+      id: 'note-id',
+      content: '',
+      tags: [],
+      resources: [resource],
+      createdAt: 1,
+      updatedAt: 1,
+      revision: 'revision-1',
+    },
+    null,
+  )
   bucket.objects.set('notes/note-id/resources/referenced-id', {
     blob: new Blob(['kept']),
     customMetadata: { kind: 'resource', uploadedAt: '0' },
@@ -193,7 +197,7 @@ test('scheduled cleanup removes expired orphans and preserves referenced and fre
 
 test('derives immediate resource removal from a note metadata update', async () => {
   const bucket = new Bucket()
-  const env = { DB: new DB(), NOTES: bucket }
+  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
   const resourceUrl = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
   await worker.fetch(
     new Request(resourceUrl, {

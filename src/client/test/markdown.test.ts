@@ -1,11 +1,5 @@
 import { expect, test } from 'vite-plus/test'
-import {
-  bareUrls,
-  markdownParser,
-  markdownSerializer,
-  referencedResourceIds,
-  schema,
-} from '../src/editor/markdown.ts'
+import { bareUrls, markdownParser, markdownSerializer, referencedResourceIds, schema } from '../src/editor/markdown.ts'
 
 test('finds bare URLs without surrounding punctuation', () => {
   expect(bareUrls('See https://example.com/a?b=1, then http://example.org.')).toEqual([

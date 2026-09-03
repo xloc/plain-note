@@ -1,11 +1,7 @@
 import { expect, test } from 'vite-plus/test'
 import { EditorState } from 'prosemirror-state'
 import { markdownSerializer, schema } from '../src/editor/markdown.ts'
-import {
-  trailingParagraph,
-  withTrailingParagraph,
-  withoutTrailingParagraph,
-} from '../src/editor/trailingParagraph.ts'
+import { trailingParagraph, withTrailingParagraph, withoutTrailingParagraph } from '../src/editor/trailingParagraph.ts'
 
 test('adds an editor-only paragraph after structural content', () => {
   const image = schema.nodes.image.create({ src: 'resource:image-id' })

@@ -82,7 +82,7 @@ export async function setMeta(key: string, value: string | number) {
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
-    const result = indexedDB.open('plain-note', 3)
+    const result = indexedDB.open('plain-note', 5)
     result.onupgradeneeded = () => {
       if (!result.result.objectStoreNames.contains('notes')) result.result.createObjectStore('notes', { keyPath: 'id' })
       if (!result.result.objectStoreNames.contains('meta')) result.result.createObjectStore('meta', { keyPath: 'key' })

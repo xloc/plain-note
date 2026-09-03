@@ -1,5 +1,5 @@
 import type { ConflictResponse, DeleteNoteRequest, Note, NoteResource, PutNoteRequest, Tombstone } from '../shared/note'
-import { type AuthEnv, requireAccess } from './auth'
+import { createAppSession, type AuthEnv, requireAppSession, requireSameOrigin, sessionApi } from './auth'
 import { getChanges, recordChange } from './index-db'
 import {
   cleanupExpiredResources,
@@ -25,10 +25,16 @@ export default {
     const url = new URL(request.url)
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
-    const authError = await requireAccess(request, env)
-    if (authError) return authError
+    const originError = requireSameOrigin(request)
+    if (originError) return originError
 
     try {
+      if (request.method === 'POST' && url.pathname === '/api/auth/session') {
+        return await createAppSession(request, env)
+      }
+      const session = await requireAppSession(request, env)
+      if (session instanceof Response) return session
+      if (url.pathname.startsWith('/api/auth/')) return await sessionApi(request, env, url, session)
       return await api(request, env, url)
     } catch (error) {
       console.error(error)

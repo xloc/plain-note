@@ -9,17 +9,14 @@ type Env = {
 }
 
 export async function ensureIndex(env: Env) {
-  await env.DB.prepare(
-    'CREATE TABLE IF NOT EXISTS index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
-  ).run()
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)').run()
 
   const rows = await env.DB.prepare(
     "SELECT key, value FROM index_meta WHERE key IN ('schema_version', 'generation')",
-  ).all<{ key: string, value: string }>()
-  const meta = Object.fromEntries(rows.results.map(row => [row.key, row.value]))
+  ).all<{ key: string; value: string }>()
+  const meta = Object.fromEntries(rows.results.map((row) => [row.key, row.value]))
 
-  if (meta.schema_version === SCHEMA_VERSION && meta.generation)
-    return meta.generation
+  if (meta.schema_version === SCHEMA_VERSION && meta.generation) return meta.generation
 
   return rebuildIndex(env)
 }
@@ -41,16 +38,17 @@ export async function rebuildIndex(env: Env) {
   let cursor: string | undefined
   do {
     const page = await env.NOTES.list({ prefix: 'notes/', cursor })
-    const noteObjects = page.objects.filter(object => object.key.endsWith('/note.md'))
-    const records = await Promise.all(noteObjects.map(async (object) => {
-      const id = object.key.slice('notes/'.length, -'/note.md'.length)
-      return { stored: await getRecord(env.NOTES, id), id }
-    }))
-    const statements = records.flatMap(({ stored, id }) => stored
-      ? [indexStatement(env.DB, id, stored.record, stored.etag)]
-      : [])
-    if (statements.length)
-      await env.DB.batch(statements)
+    const noteObjects = page.objects.filter((object) => object.key.endsWith('/note.md'))
+    const records = await Promise.all(
+      noteObjects.map(async (object) => {
+        const id = object.key.slice('notes/'.length, -'/note.md'.length)
+        return { stored: await getRecord(env.NOTES, id), id }
+      }),
+    )
+    const statements = records.flatMap(({ stored, id }) =>
+      stored ? [indexStatement(env.DB, id, stored.record, stored.etag)] : [],
+    )
+    if (statements.length) await env.DB.batch(statements)
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
 
@@ -75,20 +73,12 @@ export async function recordChange(env: Env, record: NoteRecord, etag: string) {
       r2_etag = excluded.r2_etag,
       last_seq = excluded.last_seq
     WHERE note_index.revision != excluded.revision
-  `).bind(
-    record.id,
-    record.revision,
-    record.updatedAt,
-    'deleted' in record ? 1 : 0,
-    etag,
-  ).run()
+  `)
+    .bind(record.id, record.revision, record.updatedAt, 'deleted' in record ? 1 : 0, etag)
+    .run()
 }
 
-export async function getChanges(
-  env: Env,
-  clientGeneration: string | null,
-  after: number,
-): Promise<SyncResponse> {
+export async function getChanges(env: Env, clientGeneration: string | null, after: number): Promise<SyncResponse> {
   const generation = await ensureIndex(env)
 
   if (clientGeneration !== generation) {
@@ -108,13 +98,16 @@ export async function getChanges(
     WHERE last_seq > ?
     ORDER BY last_seq
     LIMIT 500
-  `).bind(after).all<Change>()
+  `)
+    .bind(after)
+    .all<Change>()
   const cursor = result.results.at(-1)?.seq ?? after
   return { generation, reset: false, cursor, changes: result.results }
 }
 
 function indexStatement(db: D1Database, id: string, record: NoteRecord, etag: string) {
-  return db.prepare(`
+  return db
+    .prepare(`
     INSERT INTO note_index (id, revision, updated_at, deleted, r2_etag, last_seq)
     VALUES (?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
@@ -123,5 +116,6 @@ function indexStatement(db: D1Database, id: string, record: NoteRecord, etag: st
       deleted = excluded.deleted,
       r2_etag = excluded.r2_etag,
       last_seq = excluded.last_seq
-  `).bind(id, record.revision, record.updatedAt, 'deleted' in record ? 1 : 0, etag)
+  `)
+    .bind(id, record.revision, record.updatedAt, 'deleted' in record ? 1 : 0, etag)
 }

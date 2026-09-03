@@ -123,15 +123,12 @@ export async function cleanupExpiredResources(bucket: R2Bucket) {
   for (const [noteId, resources] of candidates) {
     const stored = await getRecord(bucket, noteId)
     const referenced = new Set(
-      stored && !('deleted' in stored.record)
-        ? stored.record.resources.map((resource) => resource.id)
-        : [],
+      stored && !('deleted' in stored.record) ? stored.record.resources.map((resource) => resource.id) : [],
     )
     expired.push(...resources.filter((resource) => !referenced.has(resource.id)).map((resource) => resource.key))
   }
 
-  for (let start = 0; start < expired.length; start += 1000)
-    await bucket.delete(expired.slice(start, start + 1000))
+  for (let start = 0; start < expired.length; start += 1000) await bucket.delete(expired.slice(start, start + 1000))
 }
 
 function condition(etag: string | null): R2Conditional | Headers {

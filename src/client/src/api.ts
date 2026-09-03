@@ -15,6 +15,12 @@ export class ApiConflict extends Error {
   }
 }
 
+export class ApiSessionRequired extends Error {
+  constructor() {
+    super('Session required')
+  }
+}
+
 export async function putNote(body: PutNoteRequest) {
   return api<{ note: Note }>(`/api/notes/${body.note.id}`, {
     method: 'PUT',
@@ -55,7 +61,7 @@ export function putResource(
     request.onload = () => {
       const body = JSON.parse(request.responseText) as { resource: NoteResource } | { error: string }
       if (request.status < 200 || request.status >= 300) {
-        reject(new Error('error' in body ? body.error : `Request failed with ${request.status}`))
+        reject(apiError(request.status, body))
       } else {
         onProgress(1)
         resolve(body as { resource: NoteResource })
@@ -69,7 +75,7 @@ export async function getResource(noteId: string, id: string) {
   const response = await fetch(`/api/notes/${noteId}/resources/${id}`)
   if (!response.ok) {
     const body = (await response.json()) as { error?: string }
-    throw new Error(body.error ?? `Request failed with ${response.status}`)
+    throw apiError(response.status, body)
   }
   return response.blob()
 }
@@ -83,9 +89,11 @@ export async function getChanges(generation: string | null, after: number) {
 }
 
 async function api<T extends object>(path: string, init?: RequestInit) {
+  const headers = new Headers(init?.headers)
+  if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   const response = await fetch(path, {
     ...init,
-    headers: init?.headers ?? (init?.body ? { 'Content-Type': 'application/json' } : undefined),
+    headers,
   })
   const body = (await response.json()) as T | ConflictResponse | { error: string }
   if (response.status === 409) {
@@ -93,9 +101,13 @@ async function api<T extends object>(path: string, init?: RequestInit) {
   }
 
   if (!response.ok) {
-    const message = 'error' in body ? body.error : `Request failed with ${response.status}`
-    throw new Error(message)
+    throw apiError(response.status, body)
   }
 
   return body as T
+}
+
+function apiError(status: number, body: object) {
+  const message = 'error' in body && typeof body.error === 'string' ? body.error : `Request failed with ${status}`
+  return status === 401 && message === 'session_required' ? new ApiSessionRequired() : new Error(message)
 }

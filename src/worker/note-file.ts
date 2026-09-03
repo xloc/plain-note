@@ -7,12 +7,10 @@ export function serializeNote(note: Note) {
 }
 
 export function parseNote(source: string): Note {
-  if (!source.startsWith('---\n'))
-    throw new Error('Note is missing YAML front matter')
+  if (!source.startsWith('---\n')) throw new Error('Note is missing YAML front matter')
 
   const end = source.indexOf('\n---\n', 4)
-  if (end === -1)
-    throw new Error('Note has unterminated YAML front matter')
+  if (end === -1) throw new Error('Note has unterminated YAML front matter')
 
   const metadata = parse(source.slice(4, end)) as Omit<Note, 'content'>
   return {

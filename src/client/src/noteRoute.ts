@@ -12,7 +12,7 @@ export function useNoteRoute(notes: ReturnType<typeof useNotesStore>) {
   }
 
   function showSelectedNote() {
-    if (notes.selectedId) void router.replace({ name: 'note', params: { id: notes.selectedId } })
+    if (notes.selectedId) void router.replace({ name: 'note', params: { id: notes.selectedId }, query: route.query })
   }
 
   function selectRoutedNote() {

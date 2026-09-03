@@ -78,7 +78,6 @@ defineExpose({ openAt, close })
   <button
     v-if="props.showTrigger"
     ref="trigger"
-    v-tooltip="'More actions'"
     class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-50"
     type="button"
     @click="toggle"

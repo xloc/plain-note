@@ -29,10 +29,10 @@ const emit = defineEmits<{ download: []; remove: [] }>()
       <IconFile v-else class="size-10 shrink-0" />
       <div class="min-w-0 flex-1 text-left">
         <strong class="block truncate">{{ state.resource?.name ?? state.name }}</strong>
-        <span class="block text-sm">
-          {{ state.resource?.mime || 'Missing metadata' }} · {{ formatResourceSize(state.resource?.size) }} ·
-          {{ formatResourceTime(state.resource?.createdAt) }}
+        <span v-if="state.resource" class="block text-sm">
+          {{ formatResourceSize(state.resource.size) }} · {{ formatResourceTime(state.resource.createdAt) }}
         </span>
+        <span v-else class="block text-sm">Missing metadata</span>
       </div>
       <ResourceProgress v-if="state.progress !== undefined" :value="state.progress" />
       <button type="button" title="Download resource" @click="emit('download')">

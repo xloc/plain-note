@@ -50,22 +50,18 @@ test('reports sanitized R2 storage usage', async () => {
   }
 
   try {
-    const response = await storageUsageResponse(
-      new Request('https://notes.example.com/api/usage'),
-      {
-        CLOUDFLARE_ACCOUNT_ID: 'usage-account-id',
-        CLOUDFLARE_USAGE_TOKEN: 'token',
-        NOTES: emptyBucket,
-      },
-    )
+    const response = await storageUsageResponse(new Request('https://notes.example.com/api/usage'), {
+      CLOUDFLARE_ACCOUNT_ID: 'usage-account-id',
+      CLOUDFLARE_USAGE_TOKEN: 'token',
+      NOTES: emptyBucket,
+    })
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), {
       usedBytes: 1_234,
       limitBytes: 10_000_000_000,
       cutoffBytes: 8_000_000_000,
     })
-  }
-  finally {
+  } finally {
     globalThis.fetch = originalFetch
   }
 })
@@ -78,10 +74,7 @@ test('sums paginated local R2 storage against the development limit', async () =
         : { objects: [{ size: 100 }, { size: 200 }], truncated: true, cursor: 'next' }
     },
   }
-  const response = await storageUsageResponse(
-    new Request('http://localhost:8787/api/usage'),
-    { NOTES: bucket },
-  )
+  const response = await storageUsageResponse(new Request('http://localhost:8787/api/usage'), { NOTES: bucket })
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), {
@@ -93,10 +86,9 @@ test('sums paginated local R2 storage against the development limit', async () =
 
 test('blocks local mutations at the development storage cutoff', async () => {
   const bucket = { list: async () => ({ objects: [{ size: 80_000_000 }], truncated: false }) }
-  const response = await requireFreeTierCapacity(
-    new Request('http://localhost:8787/api/notes/1', { method: 'PUT' }),
-    { NOTES: bucket },
-  )
+  const response = await requireFreeTierCapacity(new Request('http://localhost:8787/api/notes/1', { method: 'PUT' }), {
+    NOTES: bucket,
+  })
 
   assert.equal(response?.status, 503)
   assert.deepEqual(await response?.json(), { error: 'free_tier_limit_near', limit: 'r2_storage' })
@@ -130,18 +122,18 @@ test('uses account-wide Cloudflare usage', async () => {
       return Response.json({
         data: {
           viewer: {
-            accounts: [{
-              d1: [{ sum: { rowsRead: 4_000_000, rowsWritten: 0 } }],
-              r2: [{ dimensions: { actionType: 'GetObject' }, sum: { requests: 1 } }],
-            }],
+            accounts: [
+              {
+                d1: [{ sum: { rowsRead: 4_000_000, rowsWritten: 0 } }],
+                r2: [{ dimensions: { actionType: 'GetObject' }, sum: { requests: 1 } }],
+              },
+            ],
           },
         },
       })
     }
-    if (url.includes('/d1/database?'))
-      return Response.json({ success: true, result: [{ uuid: 'database-id' }] })
-    if (url.includes('/d1/database/database-id'))
-      return Response.json({ success: true, result: { file_size: 1000 } })
+    if (url.includes('/d1/database?')) return Response.json({ success: true, result: [{ uuid: 'database-id' }] })
+    if (url.includes('/d1/database/database-id')) return Response.json({ success: true, result: { file_size: 1000 } })
     if (url.endsWith('/r2/metrics')) {
       return Response.json({
         success: true,
@@ -152,17 +144,17 @@ test('uses account-wide Cloudflare usage', async () => {
   }
 
   try {
-    const response = await requireFreeTierCapacity(
-      new Request('https://notes.example.com/api/sync'),
-      { CLOUDFLARE_ACCOUNT_ID: 'account-id', CLOUDFLARE_USAGE_TOKEN: 'token', NOTES: emptyBucket },
-    )
+    const response = await requireFreeTierCapacity(new Request('https://notes.example.com/api/sync'), {
+      CLOUDFLARE_ACCOUNT_ID: 'account-id',
+      CLOUDFLARE_USAGE_TOKEN: 'token',
+      NOTES: emptyBucket,
+    })
     assert.equal(response?.status, 503)
     assert.deepEqual(await response?.json(), {
       error: 'free_tier_limit_near',
       limit: 'd1_rows_read',
     })
-  }
-  finally {
+  } finally {
     globalThis.fetch = originalFetch
   }
 })

@@ -73,12 +73,7 @@ onBeforeUnmount(removeExternalAnchor)
   </span>
 
   <Teleport :to="teleportTarget">
-    <div
-      v-if="visible"
-      ref="panel"
-      class="pointer-events-none z-100"
-      :style="floatingStyles"
-    >
+    <div v-if="visible" ref="panel" class="pointer-events-none z-100" :style="floatingStyles">
       <slot name="panel">
         <div class="rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm text-stone-800 shadow-lg">
           <slot name="content">{{ text }}</slot>

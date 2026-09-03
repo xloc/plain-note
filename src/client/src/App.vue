@@ -1,37 +1,37 @@
 <script setup lang="ts">
-import {
-  ArrowPathIcon,
-  CheckCircleIcon,
-  ChevronLeftIcon,
-  CloudArrowUpIcon,
-  ExclamationCircleIcon,
-  PencilSquareIcon,
-  SignalSlashIcon,
-} from '@heroicons/vue/24/outline'
+import { ChevronLeftIcon, PencilSquareIcon } from '@heroicons/vue/24/outline'
 import { IconDatabaseX, IconEye, IconFileTypeHtml, IconMarkdown, IconPaperclip, IconTrash } from '@tabler/icons-vue'
-import { useFileDialog, useOnline, useStorage, useSwipe } from '@vueuse/core'
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { useFileDialog, useStorage, useSwipe } from '@vueuse/core'
+import { computed, ref, useTemplateRef } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useCloudStatus } from './cloudStatus'
+import CloudStatusIcon from './components/CloudStatusIcon.vue'
 import EditorModeToggle from './components/EditorModeToggle.vue'
 import NoteEditor from './components/NoteEditor.vue'
 import NoteList from './components/NoteList.vue'
 import NoteResources from './components/NoteResources.vue'
 import PopupMenu, { type PopupMenuItem } from './components/PopupMenu.vue'
+import Sessions from './Sessions.vue'
 import { exportHtml, exportMarkdown, exportMarkdownWithMetadata, renderHtml } from './editor/exportNote'
 import { noteTitle } from './presentation'
 import { useNoteRoute } from './noteRoute'
+import { useCloudSyncStore } from './stores/cloudSync'
 import { useNotesStore } from './stores/notes'
 
 const notes = useNotesStore()
+const cloudSync = useCloudSyncStore()
+const route = useRoute()
+const router = useRouter()
 const { openNote: openNoteRoute } = useNoteRoute(notes)
-const online = useOnline()
 const editorScreen = useTemplateRef<HTMLElement>('editorScreen')
 const noteEditor = useTemplateRef<InstanceType<typeof NoteEditor>>('noteEditor')
 const showNoteList = useStorage('plain-note:show-note-list', !notes.selectedId)
 const previewMode = useStorage('plain-note:preview-mode', false)
 const htmlExportPreview = ref(false)
 const fileDialog = useFileDialog({ multiple: true, reset: true })
+const cloud = useCloudStatus()
 let swipeFromEdge = false
-const sync = () => void notes.sync()
+const openSyncStatus = () => void router.push({ query: { ...route.query, sessions: '1' } })
 const createNote = () => {
   showNoteList.value = false
   previewMode.value = false
@@ -71,9 +71,11 @@ const htmlExportPreviewSource = computed(() => {
   return note ? renderHtml(note.content, noteTitle(note.content)) : ''
 })
 const resetLocalData = () => {
-  if (window.confirm('Delete all local notes and reload them from the server? Unsynced changes will be lost.')) {
-    void notes.resetLocalData()
+  const hasUnsyncedChanges = notes.notes.some((note) => note.syncState === 'pending')
+  if (hasUnsyncedChanges) {
+    if (!window.confirm('Some notes are not synced. Discard their changes?')) return
   }
+  void cloudSync.resetLocalData()
 }
 const exportSelectedMarkdown = (): void => {
   const note = notes.selectedNote
@@ -113,11 +115,6 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
   },
 ])
 
-watch(online, (isOnline) => {
-  if (isOnline) {
-    sync()
-  }
-})
 </script>
 
 <template>
@@ -145,13 +142,12 @@ watch(online, (isOnline) => {
               <PencilSquareIcon class="size-5" />
             </button>
             <button
-              class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-100"
+              class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-200"
               type="button"
-              title="Sync now"
-              :disabled="notes.syncing"
-              @click="notes.sync"
+              :title="cloud.status.value.title"
+              @click="openSyncStatus"
             >
-              <ArrowPathIcon class="size-5" />
+              <CloudStatusIcon :status="cloud.status.value.kind" class="size-5" />
             </button>
           </div>
           <div class="flex items-center gap-2">
@@ -192,21 +188,10 @@ watch(online, (isOnline) => {
           <span class="hidden sm:inline">
             {{ characterCount }} {{ characterCount === 1 ? 'character' : 'characters' }}
           </span>
-          <span v-tooltip="notes.syncMessage" role="status">
-            <SignalSlashIcon v-if="!online" class="size-5 text-stone-400" />
-            <ArrowPathIcon v-else-if="notes.syncing" class="size-5 text-blue-500" />
-            <ExclamationCircleIcon
-              v-else-if="
-                notes.syncMessage !== 'Synced' && notes.syncMessage !== 'Pending' && notes.syncMessage !== 'Local only'
-              "
-              class="size-5 text-red-500"
-            />
-            <CloudArrowUpIcon v-else-if="notes.selectedNote?.syncState === 'pending'" class="size-5 text-amber-500" />
-            <CheckCircleIcon v-else class="size-5 text-green-500" />
-          </span>
         </footer>
       </article>
     </template>
+    <Sessions />
   </main>
 </template>
 

@@ -310,8 +310,7 @@ export class TableView implements NodeView {
     this.dropIndicator.hidden = false
     this.dropIndicator.style.height = this.draggedAxis === 'column' ? `${this.table.offsetHeight}px` : ''
     this.dropIndicator.style.width = this.draggedAxis === 'row' ? `${this.table.offsetWidth}px` : ''
-    this.dropIndicator.style.left =
-      this.draggedAxis === 'column' ? `${boundary}px` : `${this.table.offsetLeft}px`
+    this.dropIndicator.style.left = this.draggedAxis === 'column' ? `${boundary}px` : `${this.table.offsetLeft}px`
     this.dropIndicator.style.top = this.draggedAxis === 'row' ? `${boundary}px` : `${this.table.offsetTop}px`
   }
 

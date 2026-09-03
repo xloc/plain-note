@@ -63,9 +63,11 @@ function noteHeading(content: string) {
 }
 
 function sameDay(left: Date, right: Date) {
-  return left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate()
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
 }
 
 function pad(value: number) {

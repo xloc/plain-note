@@ -278,11 +278,7 @@ function resourceNode(resource: NoteResource) {
   })
 }
 
-async function insertFiles(
-  files: File[],
-  insertion: FileInsertionPoint,
-  documentId = props.documentId,
-) {
+async function insertFiles(files: File[], insertion: FileInsertionPoint, documentId = props.documentId) {
   const resources = await notes.addResources(documentId, files)
   if (!resources?.length || !view || props.documentId !== documentId) return
 

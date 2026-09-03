@@ -40,8 +40,7 @@ export const autoLinks = new Plugin<DecorationSet>({
   key: autoLinksKey,
   state: {
     init: (_, state) => decorations(state),
-    apply: (transaction, links, _oldState, newState) =>
-      transaction.docChanged ? decorations(newState) : links,
+    apply: (transaction, links, _oldState, newState) => (transaction.docChanged ? decorations(newState) : links),
   },
   props: {
     decorations: (state) => autoLinksKey.getState(state),

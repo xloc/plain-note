@@ -35,20 +35,22 @@ End-to-end test and demo instructions are in [e2e/README.md](e2e/README.md).
 ## Cloudflare deployment
 
 ### First production deployment
+
 1. Create an R2 bucket and D1 database named `plain-note`.
 2. Replace `d1_databases.database_id` in `wrangler.jsonc`.
 3. `pnpm deploy`
 4. Configure Cloudflare Access (Auth):
-    1. Enable zero trust
-    3. Allow policy: intended email addresses or identity groups
-    4. Add worker environment variables: 
-        - `TEAM_DOMAIN`: like `https://throbbing-firefly-e880.cloudflareaccess.com`
-        - `POLICY_AUD`: like `64bc46c...` len=64
+   1. Enable zero trust
+   2. Allow policy: intended email addresses or identity groups
+   3. Add worker environment variables:
+      - `TEAM_DOMAIN`: like `https://throbbing-firefly-e880.cloudflareaccess.com`
+      - `POLICY_AUD`: like `64bc46c...` len=64
 
 ### Later deployments
+
 1. `pnpm deploy`
 2. Config conflict:
-    - “Continue?”: No
-    - “Update the local config?”: Yes
+   - “Continue?”: No
+   - “Update the local config?”: Yes
 3. `pnpm deploy` again
 4. After deployment: discard `wrangler.jsonc` changes

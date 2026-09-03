@@ -8,9 +8,9 @@ export type FileInsertionPoint = { position: number; gap: boolean }
 export function containsFiles(transfer: Transfer | null) {
   if (!transfer) return false
   return (
-    transfer.files.length > 0
-    || Array.from(transfer.types).includes('Files')
-    || Array.from(transfer.items).some((item) => item.kind === 'file')
+    transfer.files.length > 0 ||
+    Array.from(transfer.types).includes('Files') ||
+    Array.from(transfer.items).some((item) => item.kind === 'file')
   )
 }
 
@@ -25,11 +25,7 @@ export function fileInsertionPoint(selection: Selection): FileInsertionPoint {
   }
 }
 
-export function insertTransferredContent(
-  transaction: Transaction,
-  insertion: FileInsertionPoint,
-  content: Fragment,
-) {
+export function insertTransferredContent(transaction: Transaction, insertion: FileInsertionPoint, content: Fragment) {
   const position = Math.min(insertion.position, transaction.doc.content.size)
   const resolved = transaction.doc.resolve(position)
   transaction
