@@ -2,7 +2,8 @@
 
 These Playwright tests exercise the main note lifecycle in a real Chromium browser. They cover creating and
 formatting notes, switching between notes, browser history, reloading persisted notes, and importing
-[`markdown-feature-test.md`](markdown-feature-test.md). The mobile workflow separately exercises the full-screen
+[`markdown-feature-test.md`](markdown-feature-test.md). They also verify that key rotation rebuilds encrypted notes
+and resources and that another device needs the new key. The mobile workflow separately exercises the full-screen
 note list and editor because their navigation differs from the desktop layout.
 
 ## Setup

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blockedLimit, requireFreeTierCapacity, storageUsageResponse } from './usage.ts'
+import { blockedLimit, requireFreeTierCapacity, storageStatusResponse } from './usage.ts'
 
 const available = {
   d1RowsRead: 0,
@@ -12,6 +12,31 @@ const available = {
   r2InfrequentBytes: 0,
 }
 const emptyBucket = { list: async () => ({ objects: [], truncated: false }) }
+
+function statusDatabase(referencedResources = 0, issues = []) {
+  return {
+    prepare(source) {
+      return {
+        bind() {
+          return this
+        },
+        async run() {},
+        async all() {
+          if (source.includes("key IN ('schema_version', 'generation')"))
+            return {
+              results: [
+                { key: 'schema_version', value: '3' },
+                { key: 'generation', value: 'generation-1' },
+              ],
+            }
+          if (source.includes('SUM(resource_count)')) return { results: [{ count: referencedResources }] }
+          if (source.includes('FROM server_issues')) return { results: issues }
+          return { results: [] }
+        },
+      }
+    },
+  }
+}
 
 test('allows local development without usage configuration', async () => {
   const request = new Request('http://192.168.1.20:8787/api/sync')
@@ -30,7 +55,7 @@ test('fails closed when deployed without usage configuration', async () => {
   assert.deepEqual(await response?.json(), { error: 'usage_not_configured' })
 })
 
-test('reports sanitized R2 storage usage', async () => {
+test('reports sanitized storage status', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input) => {
     const url = String(input)
@@ -50,9 +75,10 @@ test('reports sanitized R2 storage usage', async () => {
   }
 
   try {
-    const response = await storageUsageResponse(new Request('https://notes.example.com/api/usage'), {
+    const response = await storageStatusResponse(new Request('https://notes.example.com/api/storage'), {
       CLOUDFLARE_ACCOUNT_ID: 'usage-account-id',
       CLOUDFLARE_USAGE_TOKEN: 'token',
+      DB: statusDatabase(2),
       NOTES: emptyBucket,
     })
     assert.equal(response.status, 200)
@@ -60,6 +86,9 @@ test('reports sanitized R2 storage usage', async () => {
       usedBytes: 1_234,
       limitBytes: 10_000_000_000,
       cutoffBytes: 8_000_000_000,
+      referencedResources: 2,
+      storedResources: 0,
+      issues: [],
     })
   } finally {
     globalThis.fetch = originalFetch
@@ -70,17 +99,31 @@ test('sums paginated local R2 storage against the development limit', async () =
   const bucket = {
     async list(options = {}) {
       return options.cursor
-        ? { objects: [{ size: 300 }], truncated: false }
-        : { objects: [{ size: 100 }, { size: 200 }], truncated: true, cursor: 'next' }
+        ? { objects: [{ key: 'notes/1/resources/b', size: 300 }], truncated: false }
+        : {
+            objects: [
+              { key: 'notes/1/resources/a', size: 100 },
+              { key: 'notes/1/note.md', size: 200 },
+            ],
+            truncated: true,
+            cursor: 'next',
+          }
     },
   }
-  const response = await storageUsageResponse(new Request('http://localhost:8787/api/usage'), { NOTES: bucket })
+  const issues = [{ code: 'resource_cleanup_failed', lastOccurredAt: 1, occurrences: 2 }]
+  const response = await storageStatusResponse(new Request('http://localhost:8787/api/storage'), {
+    DB: statusDatabase(1, issues),
+    NOTES: bucket,
+  })
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), {
     usedBytes: 600,
     limitBytes: 100_000_000,
     cutoffBytes: 80_000_000,
+    referencedResources: 1,
+    storedResources: 2,
+    issues,
   })
 })
 

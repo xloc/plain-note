@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { IconDownload, IconFile, IconTrash } from '@tabler/icons-vue'
 import type { NoteResource } from '../../../shared/note'
-import { formatResourceSize, formatResourceTime } from '../presentation'
+import { formatResourceTime, formatSize } from '../presentation'
 import ResourceIcon from './ResourceIcon.vue'
 import ResourceProgress from './ResourceProgress.vue'
 
@@ -30,7 +30,7 @@ const emit = defineEmits<{ download: []; remove: [] }>()
       <div class="min-w-0 flex-1 text-left">
         <strong class="block truncate">{{ state.resource?.name ?? state.name }}</strong>
         <span v-if="state.resource" class="block text-sm">
-          {{ formatResourceSize(state.resource.size) }} · {{ formatResourceTime(state.resource.createdAt) }}
+          {{ formatSize(state.resource.size) }} · {{ formatResourceTime(state.resource.createdAt) }}
         </span>
         <span v-else class="block text-sm">Missing metadata</span>
       </div>

@@ -1,7 +1,7 @@
-import type { Change, NoteRecord, SyncResponse } from '../shared/note'
-import { getRecord } from './storage'
+import type { Change, RemoteNoteRecord, SyncResponse } from '../shared/note.ts'
+import { getRecord } from './storage.ts'
 
-const SCHEMA_VERSION = '2'
+const SCHEMA_VERSION = '3'
 
 type Env = {
   DB: D1Database
@@ -30,6 +30,7 @@ export async function rebuildIndex(env: Env) {
       revision TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
       deleted INTEGER NOT NULL,
+      resource_count INTEGER NOT NULL,
       r2_etag TEXT NOT NULL,
       last_seq INTEGER NOT NULL
     )`),
@@ -61,21 +62,37 @@ export async function rebuildIndex(env: Env) {
   return generation
 }
 
-export async function recordChange(env: Env, record: NoteRecord, etag: string) {
+export async function recordChange(env: Env, record: RemoteNoteRecord, etag: string) {
   await ensureIndex(env)
   await env.DB.prepare(`
-    INSERT INTO note_index (id, revision, updated_at, deleted, r2_etag, last_seq)
-    VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(last_seq), 0) + 1 FROM note_index))
+    INSERT INTO note_index (id, revision, updated_at, deleted, resource_count, r2_etag, last_seq)
+    VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(last_seq), 0) + 1 FROM note_index))
     ON CONFLICT(id) DO UPDATE SET
       revision = excluded.revision,
       updated_at = excluded.updated_at,
       deleted = excluded.deleted,
+      resource_count = excluded.resource_count,
       r2_etag = excluded.r2_etag,
       last_seq = excluded.last_seq
     WHERE note_index.revision != excluded.revision
   `)
-    .bind(record.id, record.revision, record.updatedAt, 'deleted' in record ? 1 : 0, etag)
+    .bind(
+      record.id,
+      record.revision,
+      record.updatedAt,
+      'deleted' in record ? 1 : 0,
+      'deleted' in record ? 0 : new Set(record.resourceIds).size,
+      etag,
+    )
     .run()
+}
+
+export async function referencedResourceCount(env: Env) {
+  await ensureIndex(env)
+  const result = await env.DB.prepare(
+    'SELECT COALESCE(SUM(resource_count), 0) AS count FROM note_index WHERE deleted = 0',
+  ).all<{ count: number }>()
+  return result.results[0]?.count ?? 0
 }
 
 export async function getChanges(env: Env, clientGeneration: string | null, after: number): Promise<SyncResponse> {
@@ -105,17 +122,25 @@ export async function getChanges(env: Env, clientGeneration: string | null, afte
   return { generation, reset: false, cursor, changes: result.results }
 }
 
-function indexStatement(db: D1Database, id: string, record: NoteRecord, etag: string) {
+function indexStatement(db: D1Database, id: string, record: RemoteNoteRecord, etag: string) {
   return db
     .prepare(`
-    INSERT INTO note_index (id, revision, updated_at, deleted, r2_etag, last_seq)
-    VALUES (?, ?, ?, ?, ?, 0)
+    INSERT INTO note_index (id, revision, updated_at, deleted, resource_count, r2_etag, last_seq)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
       revision = excluded.revision,
       updated_at = excluded.updated_at,
       deleted = excluded.deleted,
+      resource_count = excluded.resource_count,
       r2_etag = excluded.r2_etag,
       last_seq = excluded.last_seq
   `)
-    .bind(id, record.revision, record.updatedAt, 'deleted' in record ? 1 : 0, etag)
+    .bind(
+      id,
+      record.revision,
+      record.updatedAt,
+      'deleted' in record ? 1 : 0,
+      'deleted' in record ? 0 : new Set(record.resourceIds).size,
+      etag,
+    )
 }

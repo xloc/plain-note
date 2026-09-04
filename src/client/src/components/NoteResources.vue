@@ -1,51 +1,33 @@
 <script setup lang="ts">
 import { IconDownload, IconFolder, IconTrash, IconX } from '@tabler/icons-vue'
-import { computed, ref, useTemplateRef } from 'vue'
-import type { NoteResource, StorageUsage } from '../../../shared/note'
-import { getStorageUsage } from '../api'
-import { formatResourceSize, formatResourceTime } from '../presentation'
+import { computed, useTemplateRef } from 'vue'
+import type { NoteResource } from '../../../shared/note'
+import { formatResourceTime, formatSize } from '../presentation'
 import { useNotesStore } from '../stores/notes'
+import { useStorageStatusStore } from '../stores/storageStatus'
 import ResourceIcon from './ResourceIcon.vue'
 import ResourceProgress from './ResourceProgress.vue'
 
 const emit = defineEmits<{ remove: [id: string] }>()
 const notes = useNotesStore()
+const storage = useStorageStatusStore()
 const dialog = useTemplateRef<HTMLDialogElement>('dialog')
-const usage = ref<StorageUsage>()
-const usageLoading = ref(false)
-const usageUnavailable = ref(false)
 const usagePercent = computed(() =>
-  usage.value ? Math.min(100, (usage.value.usedBytes / usage.value.limitBytes) * 100) : 0,
+  storage.status ? Math.min(100, (storage.status.usedBytes / storage.status.limitBytes) * 100) : 0,
 )
 const cutoffPercent = computed(() =>
-  usage.value ? Math.min(100, (usage.value.cutoffBytes / usage.value.limitBytes) * 100) : 0,
+  storage.status ? Math.min(100, (storage.status.cutoffBytes / storage.status.limitBytes) * 100) : 0,
 )
 const usageColor = computed(() => {
-  if (!usage.value) return 'bg-stone-500'
-  if (usage.value.usedBytes >= usage.value.cutoffBytes) return 'bg-red-500'
-  if (usage.value.usedBytes >= usage.value.cutoffBytes * 0.75) return 'bg-amber-500'
+  if (!storage.status) return 'bg-stone-500'
+  if (storage.status.usedBytes >= storage.status.cutoffBytes) return 'bg-red-500'
+  if (storage.status.usedBytes >= storage.status.cutoffBytes * 0.75) return 'bg-amber-500'
   return 'bg-stone-500'
 })
 
-async function open() {
+function open() {
   dialog.value?.showModal()
-  usageLoading.value = true
-  usageUnavailable.value = false
-  try {
-    usage.value = await getStorageUsage()
-  } catch {
-    usage.value = undefined
-    usageUnavailable.value = true
-  } finally {
-    usageLoading.value = false
-  }
-}
-
-function formatStorageSize(bytes: number) {
-  if (bytes < 1_000) return `${bytes} B`
-  if (bytes < 1_000_000) return `${(bytes / 1_000).toFixed(1)} KB`
-  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
-  return `${(bytes / 1_000_000_000).toFixed(2)} GB`
+  void storage.refresh()
 }
 
 function download(resource: NoteResource) {
@@ -82,7 +64,7 @@ function download(resource: NoteResource) {
         </button>
       </header>
 
-      <div class="overflow-y-auto px-5 py-2">
+      <div class="overflow-y-auto px-5 pt-2 pb-5">
         <ul v-if="notes.selectedNote?.resources.length" class="space-y-2">
           <li
             v-for="resource in notes.selectedNote.resources"
@@ -93,7 +75,7 @@ function download(resource: NoteResource) {
             <div class="min-w-0 flex-1">
               <span class="block truncate font-medium">{{ resource.name }}</span>
               <span class="block truncate text-sm text-stone-500">
-                {{ formatResourceSize(resource.size) }} · {{ formatResourceTime(resource.createdAt) }}
+                {{ formatSize(resource.size) }} · {{ formatResourceTime(resource.createdAt) }}
               </span>
             </div>
             <ResourceProgress
@@ -122,18 +104,18 @@ function download(resource: NoteResource) {
       </div>
 
       <div class="flex w-fit items-center gap-3 px-5 pt-3 pb-5 text-sm">
-        <p v-if="usageLoading" class="text-stone-500">Loading storage usage…</p>
-        <p v-else-if="usageUnavailable" class="text-stone-500">Storage usage unavailable.</p>
-        <template v-else-if="usage">
+        <p v-if="storage.loading && !storage.status" class="text-stone-500">Loading storage usage…</p>
+        <p v-else-if="storage.message && !storage.status" class="text-stone-500">Storage usage unavailable.</p>
+        <template v-else-if="storage.status">
           <div
-            v-tooltip="`Upload cutoff: ${formatStorageSize(usage.cutoffBytes)}`"
+            v-tooltip="`Upload cutoff: ${formatSize(storage.status.cutoffBytes)}`"
             class="relative h-2 w-36 overflow-hidden rounded-full bg-stone-200"
           >
             <div class="h-full rounded-full" :class="usageColor" :style="{ width: `${usagePercent}%` }" />
             <div class="absolute inset-y-0 w-px bg-stone-800" :style="{ left: `${cutoffPercent}%` }" />
           </div>
           <span class="whitespace-nowrap">
-            {{ formatStorageSize(usage.usedBytes) }} / {{ formatStorageSize(usage.limitBytes) }}
+            {{ formatSize(storage.status.usedBytes) }} / {{ formatSize(storage.status.limitBytes) }}
           </span>
         </template>
       </div>

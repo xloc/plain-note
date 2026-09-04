@@ -87,3 +87,7 @@ A future archive format can restore resource metadata together with the correspo
 - Resource archive export and import.
 - Resource renaming.
 - Content hashing, content-addressed storage, and deduplication.
+
+## Client-side encryption
+
+End-to-end encryption is added in [Client-Side Encryption](06-client-side-encryption.md). R2 then stores encrypted resource bytes.

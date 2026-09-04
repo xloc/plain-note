@@ -34,12 +34,12 @@ export function groupNotesByUpdatedAt(notes: LocalNote[]) {
   ].filter((section) => section.notes.length)
 }
 
-export function formatResourceSize(size?: number) {
+export function formatSize(size?: number) {
   if (size === undefined) return 'Unknown size'
-  if (size < 1024) return `${size} B`
-  if (size < 1024 ** 2) return `${(size / 1024).toFixed(1)} KB`
-  if (size < 1024 ** 3) return `${(size / 1024 ** 2).toFixed(1)} MB`
-  return `${(size / 1024 ** 3).toFixed(1)} GB`
+  if (size < 1_000) return `${size} B`
+  if (size < 1_000_000) return `${(size / 1_000).toFixed(1)} KB`
+  if (size < 1_000_000_000) return `${(size / 1_000_000).toFixed(1)} MB`
+  return `${(size / 1_000_000_000).toFixed(1)} GB`
 }
 
 export function formatResourceTime(createdAt?: number) {

@@ -1,10 +1,9 @@
-import type { Note, NoteRecord, Tombstone } from '../shared/note'
-import { parseNote, serializeNote, serializeTombstone } from './note-file'
+import type { EncryptedNote, RemoteNoteRecord, Tombstone } from '../shared/note'
 
 const RESOURCE_GRACE_MS = 24 * 60 * 60 * 1000
 
 export type StoredRecord = {
-  record: NoteRecord
+  record: RemoteNoteRecord
   etag: string
 }
 
@@ -21,21 +20,23 @@ export async function getRecord(bucket: R2Bucket, id: string): Promise<StoredRec
   if (!object) return null
 
   const source = await object.text()
-  const record = object.customMetadata?.kind === 'tombstone' ? (JSON.parse(source) as Tombstone) : parseNote(source)
+  const kind = object.customMetadata?.kind
+  if (kind !== 'tombstone' && kind !== 'encrypted-note') throw new Error('Unsupported note format')
+  const record = JSON.parse(source) as RemoteNoteRecord
 
   return { record, etag: object.etag }
 }
 
-export async function putNote(bucket: R2Bucket, note: Note, etag: string | null) {
-  return bucket.put(noteKey(note.id), serializeNote(note), {
+export async function putNote(bucket: R2Bucket, note: EncryptedNote, etag: string | null) {
+  return bucket.put(noteKey(note.id), JSON.stringify(note), {
     onlyIf: condition(etag),
-    httpMetadata: { contentType: 'text/markdown; charset=utf-8' },
-    customMetadata: { kind: 'note', revision: note.revision },
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { kind: 'encrypted-note', revision: note.revision },
   })
 }
 
 export async function putTombstone(bucket: R2Bucket, tombstone: Tombstone, etag: string) {
-  return bucket.put(noteKey(tombstone.id), serializeTombstone(tombstone), {
+  return bucket.put(noteKey(tombstone.id), JSON.stringify(tombstone, null, 2), {
     onlyIf: { etagMatches: etag },
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
     customMetadata: { kind: 'tombstone', revision: tombstone.revision },
@@ -46,27 +47,31 @@ export async function getResource(bucket: R2Bucket, noteId: string, id: string) 
   return bucket.get(resourceKey(noteId, id))
 }
 
-export async function putResource(
-  bucket: R2Bucket,
-  noteId: string,
-  resource: { id: string; name: string; mime: string; size: number; createdAt: number },
-  body: ReadableStream,
-) {
-  return bucket.put(resourceKey(noteId, resource.id), body, {
+export async function putResource(bucket: R2Bucket, noteId: string, resourceId: string, body: ReadableStream) {
+  const key = resourceKey(noteId, resourceId)
+  const existing = await bucket.head(key)
+  if (existing) return existing
+
+  return bucket.put(key, body, {
     onlyIf: new Headers({ 'If-None-Match': '*' }),
-    httpMetadata: { contentType: resource.mime || 'application/octet-stream' },
-    customMetadata: {
-      kind: 'resource',
-      name: encodeURIComponent(resource.name),
-      size: String(resource.size),
-      createdAt: String(resource.createdAt),
-      uploadedAt: String(Date.now()),
-    },
+    httpMetadata: { contentType: 'application/octet-stream' },
   })
 }
 
 export async function deleteResource(bucket: R2Bucket, noteId: string, id: string) {
   await bucket.delete(resourceKey(noteId, id))
+}
+
+export async function clearNotes(bucket: R2Bucket) {
+  const keys: string[] = []
+  let cursor: string | undefined
+  do {
+    const page = await bucket.list({ prefix: 'notes/', cursor })
+    keys.push(...page.objects.map((object) => object.key))
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+
+  for (let start = 0; start < keys.length; start += 1000) await bucket.delete(keys.slice(start, start + 1000))
 }
 
 export async function cleanupResources(
@@ -77,20 +82,18 @@ export async function cleanupResources(
 ) {
   const referenced = new Set(referencedIds)
   const removed = new Set(removedIds)
-  const expiredBefore = Date.now() - RESOURCE_GRACE_MS
+  const now = Date.now()
   let cursor: string | undefined
   do {
     const page = await bucket.list({
       prefix: `notes/${noteId}/resources/`,
       cursor,
-      include: ['customMetadata'],
     })
     const expired = page.objects
       .filter((object) => {
         const id = object.key.slice(`notes/${noteId}/resources/`.length)
-        return (
-          !referenced.has(id) && (removed.has(id) || Number(object.customMetadata?.uploadedAt ?? 0) <= expiredBefore)
-        )
+        const expiresAt = object.uploaded.getTime() + RESOURCE_GRACE_MS
+        return !referenced.has(id) && (removed.has(id) || expiresAt <= now)
       })
       .map((object) => object.key)
     if (expired.length) await bucket.delete(expired)
@@ -99,18 +102,18 @@ export async function cleanupResources(
 }
 
 export async function cleanupExpiredResources(bucket: R2Bucket) {
-  const expiredBefore = Date.now() - RESOURCE_GRACE_MS
+  const now = Date.now()
   const candidates = new Map<string, { id: string; key: string }[]>()
   let cursor: string | undefined
   do {
     const page = await bucket.list({
       prefix: 'notes/',
       cursor,
-      include: ['customMetadata'],
     })
     for (const object of page.objects) {
       const match = object.key.match(/^notes\/([^/]+)\/resources\/([^/]+)$/)
-      if (match && Number(object.customMetadata?.uploadedAt ?? 0) <= expiredBefore) {
+      const expiresAt = object.uploaded.getTime() + RESOURCE_GRACE_MS
+      if (match && expiresAt <= now) {
         const resources = candidates.get(match[1]) ?? []
         resources.push({ key: object.key, id: match[2] })
         candidates.set(match[1], resources)
@@ -122,9 +125,7 @@ export async function cleanupExpiredResources(bucket: R2Bucket) {
   const expired: string[] = []
   for (const [noteId, resources] of candidates) {
     const stored = await getRecord(bucket, noteId)
-    const referenced = new Set(
-      stored && !('deleted' in stored.record) ? stored.record.resources.map((resource) => resource.id) : [],
-    )
+    const referenced = new Set(stored && !('deleted' in stored.record) ? stored.record.resourceIds : [])
     expired.push(...resources.filter((resource) => !referenced.has(resource.id)).map((resource) => resource.key))
   }
 

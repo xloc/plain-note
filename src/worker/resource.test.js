@@ -1,6 +1,8 @@
-import { expect, test } from 'vite-plus/test'
+import { expect, test, vi } from 'vite-plus/test'
 import worker from './index.ts'
 import { cleanupResources, putNote } from './storage.ts'
+
+const vaultHeaders = { 'X-Vault-Key-Id': 'a'.repeat(43) }
 
 class Bucket {
   objects = new Map()
@@ -15,6 +17,7 @@ class Bucket {
       customMetadata: options?.customMetadata,
       etag: `etag-${++this.etag}`,
       httpMetadata: options?.httpMetadata,
+      uploaded: new Date(),
     }
     this.objects.set(key, object)
     return { ...object, size: blob.size }
@@ -30,7 +33,12 @@ class Bucket {
       httpMetadata: object.httpMetadata,
       size: object.blob.size,
       text: () => object.blob.text(),
+      uploaded: object.uploaded,
     }
+  }
+
+  async head(key) {
+    return this.objects.get(key) ?? null
   }
 
   async delete(key) {
@@ -41,38 +49,65 @@ class Bucket {
     }
   }
 
-  async list({ prefix }) {
+  async list({ prefix = '' } = {}) {
     return {
       objects: [...this.objects.entries()]
         .filter(([key]) => key.startsWith(prefix))
-        .map(([key, object]) => ({ key, customMetadata: object.customMetadata })),
+        .map(([key, object]) => ({ key, size: object.blob?.size ?? 0, uploaded: object.uploaded })),
       truncated: false,
     }
   }
 }
 
 class DB {
+  cleanupFailures = 0
+  lastCleanupFailure = 0
+
+  async batch(statements) {
+    for (const statement of statements) await statement.run()
+  }
+
   prepare(source) {
+    const db = this
+    let values = []
     return {
-      bind() {
+      bind(...args) {
+        values = args
         return this
       },
-      async run() {},
+      async run() {
+        if (source.includes('INSERT INTO server_issues')) {
+          db.cleanupFailures += 1
+          db.lastCleanupFailure = values[1]
+        }
+        if (source.includes('DELETE FROM server_issues')) db.cleanupFailures = 0
+      },
       async all() {
-        return source.includes('SELECT key, value FROM index_meta')
-          ? {
-              results: [
-                { key: 'schema_version', value: '2' },
-                { key: 'generation', value: 'generation-1' },
-              ],
-            }
-          : { results: [] }
+        if (source.includes('SELECT key, value FROM index_meta'))
+          return {
+            results: [
+              { key: 'schema_version', value: '3' },
+              { key: 'generation', value: 'generation-1' },
+            ],
+          }
+        if (source.includes('SUM(resource_count)')) return { results: [{ count: 0 }] }
+        if (source.includes('FROM server_issues') && db.cleanupFailures)
+          return {
+            results: [
+              {
+                code: 'resource_cleanup_failed',
+                lastOccurredAt: db.lastCleanupFailure,
+                occurrences: db.cleanupFailures,
+              },
+            ],
+          }
+        return { results: [] }
       },
     }
   }
 }
 
-test('uploads and downloads an immutable resource by UUID', async () => {
+test('uploads and downloads opaque immutable resource ciphertext by UUID', async () => {
   const bucket = new Bucket()
   const env = { NOTES: bucket, TEST_AUTH_BYPASS: true }
   const url = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
@@ -81,77 +116,113 @@ test('uploads and downloads an immutable resource by UUID', async () => {
     new Request(url, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'text/plain',
-        'X-Resource-Name': encodeURIComponent('notes é.txt'),
-        'X-Resource-Size': '14',
-        'X-Resource-Created-At': '100',
+        ...vaultHeaders,
+        'Content-Type': 'application/octet-stream',
       },
       body: 'resource bytes',
     }),
     env,
   )
   expect(upload.status).toBe(200)
-  expect(await upload.json()).toEqual({
-    resource: {
-      id: 'resource-id',
-      name: 'notes é.txt',
-      mime: 'text/plain',
-      size: 14,
-      createdAt: 100,
-    },
-  })
+  expect(await upload.json()).toEqual({ ok: true })
 
-  const download = await worker.fetch(new Request(url), env)
+  const download = await worker.fetch(new Request(url, { headers: vaultHeaders }), env)
   expect(download.status).toBe(200)
-  expect(download.headers.get('Content-Type')).toBe('text/plain')
+  expect(download.headers.get('Content-Type')).toBe('application/octet-stream')
   expect(await download.text()).toBe('resource bytes')
 
   const retry = await worker.fetch(
     new Request(url, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'text/plain',
-        'X-Resource-Name': encodeURIComponent('notes é.txt'),
-        'X-Resource-Size': '14',
-        'X-Resource-Created-At': '100',
+        ...vaultHeaders,
+        'Content-Type': 'application/octet-stream',
       },
-      body: 'resource bytes',
+      body: 'different retry ciphertext',
     }),
     env,
   )
   expect(retry.status).toBe(200)
+  expect(await (await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).text()).toBe('resource bytes')
 
-  const conflictingUpload = await worker.fetch(
-    new Request(url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'text/plain',
-        'X-Resource-Name': encodeURIComponent('different.txt'),
-        'X-Resource-Size': '9',
-        'X-Resource-Created-At': '100',
-      },
-      body: 'different',
+  await cleanupResources(bucket, 'note-id', [])
+  expect((await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).status).toBe(200)
+
+  await cleanupResources(bucket, 'note-id', [], ['resource-id'])
+  expect((await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).status).toBe(404)
+  expect((await worker.fetch(new Request(url, { method: 'DELETE', headers: vaultHeaders }), env)).status).toBe(405)
+})
+
+test('rejects a different vault key before returning ciphertext', async () => {
+  const bucket = new Bucket()
+  const env = { NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const url = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
+  await worker.fetch(new Request(url, { method: 'PUT', headers: vaultHeaders, body: 'ciphertext' }), env)
+
+  const response = await worker.fetch(new Request(url, { headers: { 'X-Vault-Key-Id': 'b'.repeat(43) } }), env)
+
+  expect(response.status).toBe(403)
+  expect(await response.json()).toEqual({ error: 'vault_key_mismatch' })
+})
+
+test('rebuilds the cloud vault with a new key identifier', async () => {
+  const bucket = new Bucket()
+  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const resourceUrl = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
+  await worker.fetch(new Request(resourceUrl, { method: 'PUT', headers: vaultHeaders, body: 'ciphertext' }), env)
+  await putNote(
+    bucket,
+    {
+      id: 'note-id',
+      updatedAt: 1,
+      revision: 'revision-1',
+      resourceIds: ['resource-id'],
+      encrypted: 'opaque-note-ciphertext',
+    },
+    null,
+  )
+
+  const newKeyId = 'b'.repeat(43)
+  const response = await worker.fetch(
+    new Request('http://localhost:8787/api/vault/rebuild', {
+      method: 'POST',
+      headers: { ...vaultHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyId: newKeyId }),
     }),
     env,
   )
-  expect(conflictingUpload.status).toBe(409)
-  expect(await conflictingUpload.json()).toEqual({ error: 'resource_conflict' })
-  expect(await (await worker.fetch(new Request(url), env)).text()).toBe('resource bytes')
 
-  await cleanupResources(bucket, 'note-id', [])
-  expect((await worker.fetch(new Request(url), env)).status).toBe(200)
-
-  await cleanupResources(bucket, 'note-id', [], ['resource-id'])
-  expect((await worker.fetch(new Request(url), env)).status).toBe(404)
-  expect((await worker.fetch(new Request(url, { method: 'DELETE' }), env)).status).toBe(405)
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ ok: true })
+  expect([...bucket.objects.keys()]).toEqual(['vault/key.json'])
+  expect(
+    (
+      await worker.fetch(
+        new Request('http://localhost:8787/api/sync?after=0', {
+          headers: vaultHeaders,
+        }),
+        env,
+      )
+    ).status,
+  ).toBe(403)
+  expect(
+    (
+      await worker.fetch(
+        new Request('http://localhost:8787/api/sync?after=0', {
+          headers: { 'X-Vault-Key-Id': newKeyId },
+        }),
+        env,
+      )
+    ).status,
+  ).toBe(200)
 })
 
 test('cleans up expired unreferenced uploads', async () => {
   const bucket = new Bucket()
   bucket.objects.set('notes/note-id/resources/expired-id', {
     blob: new Blob(['expired']),
-    customMetadata: { kind: 'resource', uploadedAt: '0' },
     httpMetadata: { contentType: 'text/plain' },
+    uploaded: new Date(0),
   })
 
   await cleanupResources(bucket, 'note-id', [])
@@ -159,40 +230,103 @@ test('cleans up expired unreferenced uploads', async () => {
   expect(bucket.objects.has('notes/note-id/resources/expired-id')).toBe(false)
 })
 
-test('scheduled cleanup removes expired orphans and preserves referenced and fresh resources', async () => {
+test('records a cleanup failure without failing the committed note', async () => {
   const bucket = new Bucket()
-  const resource = { id: 'referenced-id', name: 'kept.txt', mime: 'text/plain', size: 4, createdAt: 1 }
+  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const note = {
+    id: 'note-id',
+    updatedAt: 1,
+    revision: 'revision-1',
+    resourceIds: [],
+    encrypted: 'opaque-note-ciphertext',
+  }
+  const list = bucket.list.bind(bucket)
+  bucket.list = async (options) => {
+    if (options.prefix === 'notes/note-id/resources/') throw new Error('R2 unavailable')
+    return list(options)
+  }
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+  try {
+    const response = await worker.fetch(
+      new Request('http://localhost:8787/api/notes/note-id', {
+        method: 'PUT',
+        headers: vaultHeaders,
+        body: JSON.stringify({ baseRevision: null, note }),
+      }),
+      env,
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ note })
+    expect(log).toHaveBeenCalledWith('Resource cleanup failed', {
+      noteId: 'note-id',
+      error: expect.any(Error),
+    })
+
+    const status = await worker.fetch(new Request('http://localhost:8787/api/storage'), env)
+    expect((await status.json()).issues).toEqual([
+      {
+        code: 'resource_cleanup_failed',
+        lastOccurredAt: expect.any(Number),
+        occurrences: 1,
+      },
+    ])
+  } finally {
+    log.mockRestore()
+  }
+})
+
+test('scheduled cleanup uses opaque IDs and preserves referenced resources regardless of age', async () => {
+  const bucket = new Bucket()
+  const db = new DB()
+  db.cleanupFailures = 1
   await putNote(
     bucket,
     {
       id: 'note-id',
-      content: '',
-      tags: [],
-      resources: [resource],
-      createdAt: 1,
       updatedAt: 1,
       revision: 'revision-1',
+      resourceIds: ['referenced-id'],
+      encrypted: 'opaque-note-ciphertext',
     },
     null,
   )
   bucket.objects.set('notes/note-id/resources/referenced-id', {
     blob: new Blob(['kept']),
-    customMetadata: { kind: 'resource', uploadedAt: '0' },
+    uploaded: new Date(0),
   })
   bucket.objects.set('notes/note-id/resources/orphan-id', {
     blob: new Blob(['gone']),
-    customMetadata: { kind: 'resource', uploadedAt: '0' },
+    uploaded: new Date(0),
   })
   bucket.objects.set('notes/note-id/resources/fresh-id', {
     blob: new Blob(['fresh']),
-    customMetadata: { kind: 'resource', uploadedAt: String(Date.now()) },
+    uploaded: new Date(),
   })
 
-  await worker.scheduled({}, { NOTES: bucket }, {})
+  await worker.scheduled({}, { DB: db, NOTES: bucket }, {})
 
   expect(bucket.objects.has('notes/note-id/resources/referenced-id')).toBe(true)
   expect(bucket.objects.has('notes/note-id/resources/orphan-id')).toBe(false)
   expect(bucket.objects.has('notes/note-id/resources/fresh-id')).toBe(true)
+  expect(db.cleanupFailures).toBe(0)
+})
+
+test('records and surfaces a scheduled cleanup failure', async () => {
+  const bucket = new Bucket()
+  const db = new DB()
+  bucket.list = async () => {
+    throw new Error('R2 unavailable')
+  }
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+  try {
+    await expect(worker.scheduled({}, { DB: db, NOTES: bucket }, {})).rejects.toThrow('R2 unavailable')
+    expect(db.cleanupFailures).toBe(1)
+    expect(log).toHaveBeenCalledWith('Scheduled resource cleanup failed', expect.any(Error))
+  } finally {
+    log.mockRestore()
+  }
 })
 
 test('derives immediate resource removal from a note metadata update', async () => {
@@ -203,46 +337,49 @@ test('derives immediate resource removal from a note metadata update', async () 
     new Request(resourceUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'text/plain',
-        'X-Resource-Name': 'resource.txt',
-        'X-Resource-Size': '8',
-        'X-Resource-Created-At': '100',
+        ...vaultHeaders,
+        'Content-Type': 'application/octet-stream',
       },
       body: 'resource',
     }),
     env,
   )
 
-  const resource = { id: 'resource-id', name: 'resource.txt', mime: 'text/plain', size: 8, createdAt: 100 }
   const note = {
     id: 'note-id',
-    content: '',
-    tags: [],
-    resources: [resource],
-    createdAt: 1,
     updatedAt: 1,
     revision: 'revision-1',
+    resourceIds: ['resource-id'],
+    encrypted: 'opaque-note-ciphertext-1',
   }
   const created = await worker.fetch(
     new Request('http://localhost:8787/api/notes/note-id', {
       method: 'PUT',
+      headers: vaultHeaders,
       body: JSON.stringify({ baseRevision: null, note }),
     }),
     env,
   )
   expect(created.status).toBe(200)
-  expect((await worker.fetch(new Request(resourceUrl), env)).status).toBe(200)
+  expect((await worker.fetch(new Request(resourceUrl, { headers: vaultHeaders }), env)).status).toBe(200)
 
   const updated = await worker.fetch(
     new Request('http://localhost:8787/api/notes/note-id', {
       method: 'PUT',
+      headers: vaultHeaders,
       body: JSON.stringify({
         baseRevision: 'revision-1',
-        note: { ...note, resources: [], updatedAt: 2, revision: 'revision-2' },
+        note: {
+          ...note,
+          resourceIds: [],
+          encrypted: 'opaque-note-ciphertext-2',
+          updatedAt: 2,
+          revision: 'revision-2',
+        },
       }),
     }),
     env,
   )
   expect(updated.status).toBe(200)
-  expect((await worker.fetch(new Request(resourceUrl), env)).status).toBe(404)
+  expect((await worker.fetch(new Request(resourceUrl, { headers: vaultHeaders }), env)).status).toBe(404)
 })

@@ -1,6 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { CLIENT_SESSION_COOKIE, CLIENT_SESSION_HEADER, SESSION_COOKIE, type AuthStatus } from '../shared/auth.ts'
+import { base64 } from '../shared/base.ts'
 import { isLocalRequest } from './environment.ts'
+import { error, json } from './response.ts'
 
 export type AuthEnv = {
   POLICY_AUD?: string
@@ -169,18 +171,11 @@ async function ensureSchema(db: D1Database) {
 
 async function hash(value: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return base64url(digest)
+  return base64.encode(digest)
 }
 
 function randomToken() {
-  return base64url(crypto.getRandomValues(new Uint8Array(32)))
-}
-
-function base64url(value: ArrayBuffer | Uint8Array) {
-  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+  return base64.encode(crypto.getRandomValues(new Uint8Array(32)))
 }
 
 function cookie(request: Request, name: string) {
@@ -214,18 +209,4 @@ function clearSessionCookies(response: Response, request: Request) {
 function cookieValue(request: Request, name: string, value: string, maxAge: number, httpOnly: boolean) {
   const secure = isLocalRequest(request) ? '' : '; Secure'
   return `${name}=${value}${httpOnly ? '; HttpOnly' : ''}; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure}`
-}
-
-function error(message: string, status: number) {
-  return Response.json(
-    { error: message },
-    {
-      status,
-      headers: { 'Cache-Control': 'no-store' },
-    },
-  )
-}
-
-function json(value: unknown, status = 200) {
-  return Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } })
 }

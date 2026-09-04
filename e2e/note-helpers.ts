@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 
-const markdownFeatureTest = readFileSync(new URL('./markdown-feature-test.md', import.meta.url), 'utf8')
+const markdownFeatureTest = readFileSync('e2e/markdown-feature-test.md', 'utf8')
 const demo = process.env.PLAYWRIGHT_DEMO === '1'
 const primaryModifier = process.platform === 'darwin' ? 'Meta' : 'Control'
 

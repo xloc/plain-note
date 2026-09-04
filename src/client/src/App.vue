@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { ChevronLeftIcon, PencilSquareIcon } from '@heroicons/vue/24/outline'
-import { IconDatabaseX, IconEye, IconFileTypeHtml, IconMarkdown, IconPaperclip, IconTrash } from '@tabler/icons-vue'
+import {
+  IconDatabase,
+  IconDatabaseX,
+  IconEye,
+  IconFileTypeHtml,
+  IconMarkdown,
+  IconPaperclip,
+  IconTrash,
+} from '@tabler/icons-vue'
 import { useFileDialog, useStorage, useSwipe } from '@vueuse/core'
 import { computed, ref, useTemplateRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,6 +20,7 @@ import NoteList from './components/NoteList.vue'
 import NoteResources from './components/NoteResources.vue'
 import PopupMenu, { type PopupMenuItem } from './components/PopupMenu.vue'
 import Sessions from './Sessions.vue'
+import StorageStatus from './StorageStatus.vue'
 import { exportHtml, exportMarkdown, exportMarkdownWithMetadata, renderHtml } from './editor/exportNote'
 import { noteTitle } from './presentation'
 import { useNoteRoute } from './noteRoute'
@@ -32,6 +41,7 @@ const fileDialog = useFileDialog({ multiple: true, reset: true })
 const cloud = useCloudStatus()
 let swipeFromEdge = false
 const openSyncStatus = () => void router.push({ query: { ...route.query, sessions: '1' } })
+const openStorageStatus = () => void router.push({ query: { ...route.query, storage: '1' } })
 const createNote = () => {
   showNoteList.value = false
   previewMode.value = false
@@ -106,6 +116,7 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
     action: toggleHtmlExportPreview,
   },
   { icon: IconTrash, label: 'Delete note', action: () => void notes.deleteSelected(), destructive: true },
+  { icon: IconDatabase, label: 'Storage status', action: openStorageStatus },
   {
     icon: IconDatabaseX,
     label: 'Reset local data',
@@ -114,7 +125,6 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
     destructive: true,
   },
 ])
-
 </script>
 
 <template>
@@ -192,6 +202,7 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
       </article>
     </template>
     <Sessions />
+    <StorageStatus />
   </main>
 </template>
 

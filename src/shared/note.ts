@@ -25,15 +25,29 @@ export type Tombstone = {
 
 export type NoteRecord = Note | Tombstone
 
-export type PutNoteRequest = {
+export type EncryptedNote = {
+  id: string
+  revision: string
+  updatedAt: number
+  resourceIds: string[]
+  encrypted: string
+}
+
+export type RemoteNoteRecord = EncryptedNote | Tombstone
+
+export type PutEncryptedNoteRequest = {
   baseRevision: string | null
-  note: Note
+  note: EncryptedNote
 }
 
 export type DeleteNoteRequest = {
   baseRevision: string
   revision: string
   updatedAt: number
+}
+
+export type RebuildVaultRequest = {
+  keyId: string
 }
 
 export type Change = {
@@ -51,13 +65,27 @@ export type SyncResponse = {
   changes: Change[]
 }
 
-export type StorageUsage = {
+export type StorageStatus = {
   usedBytes: number
   limitBytes: number
   cutoffBytes: number
+  referencedResources: number
+  storedResources: number
+  issues: ServerIssue[]
+}
+
+export type ServerIssue = {
+  code: 'resource_cleanup_failed'
+  lastOccurredAt: number
+  occurrences: number
 }
 
 export type ConflictResponse = {
   error: 'conflict'
   current: NoteRecord
+}
+
+export type RemoteConflictResponse = {
+  error: 'conflict'
+  current: RemoteNoteRecord
 }

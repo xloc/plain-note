@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { focusDocument, importMarkdown, pauseForDemo, typeText, writeLoremNote } from './note-helpers'
 
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('plain-note:vault-key', 'pn1-11111-11111-11111-11111-11111-11111-11'),
+  )
+})
+
 test('uses the mobile note list and editor workflow', async ({ page }) => {
   const noteList = page.locator('aside')
   const editorScreen = page.locator('article')

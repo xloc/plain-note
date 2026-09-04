@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { IconX } from '@tabler/icons-vue'
+import { IconCheck, IconX } from '@tabler/icons-vue'
 import { nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCloudStatus } from './cloudStatus'
@@ -7,20 +7,27 @@ import CloudStatusIcon from './components/CloudStatusIcon.vue'
 import { useAuthStore } from './stores/auth'
 import { useCloudSyncStore } from './stores/cloudSync'
 import { useNotesStore } from './stores/notes'
+import { useVaultStore } from './stores/vault'
 
 const auth = useAuthStore()
 const notes = useNotesStore()
 const cloudSync = useCloudSyncStore()
 const cloud = useCloudStatus()
+const vault = useVaultStore()
 const route = useRoute()
 const router = useRouter()
 const dialog = useTemplateRef<HTMLDialogElement>('dialog')
 const message = ref('')
+const encryptionKeyVisible = ref(false)
+const encryptionKeyCopied = ref(false)
+const rotatingKey = ref(false)
 
 watch(
   () => route.query.sessions === '1',
   async (visible) => {
     if (visible) {
+      encryptionKeyVisible.value = false
+      encryptionKeyCopied.value = false
       await nextTick()
       dialog.value?.showModal()
       void refresh()
@@ -32,6 +39,7 @@ watch(
 )
 
 async function refresh() {
+  if (auth.state !== 'ready') return
   try {
     await auth.refresh()
     message.value = ''
@@ -62,6 +70,76 @@ async function revokeAll() {
     message.value = ''
   } catch (error) {
     message.value = errorMessage(error)
+  }
+}
+
+async function copyEncryptionKey() {
+  try {
+    await vault.copy()
+    encryptionKeyCopied.value = true
+    message.value = ''
+  } catch (error) {
+    message.value = errorMessage(error)
+  }
+}
+
+async function createEncryptionKey() {
+  try {
+    await vault.create()
+    vault.download()
+    message.value = 'Encryption key created and downloaded'
+  } catch (error) {
+    message.value = errorMessage(error)
+  }
+}
+
+async function importEncryptionKey() {
+  const key = window.prompt('Enter the recovery key for this vault')
+  if (!key) return
+  try {
+    await vault.importSecret(key)
+    message.value = 'Encryption key imported'
+  } catch (error) {
+    message.value = errorMessage(error)
+  }
+}
+
+async function changeEncryptionKey() {
+  if (
+    !window.confirm(
+      'Changing the key on this device does not re-encrypt cloud data. The replacement must match the existing cloud vault. Otherwise, this device cannot decrypt cloud notes and synchronization will stop. Local notes will not be changed.\n\nContinue?',
+    )
+  )
+    return
+
+  const key = window.prompt('Enter the replacement recovery key')
+  if (!key) return
+  try {
+    await vault.importSecret(key)
+    window.location.reload()
+  } catch (error) {
+    message.value = errorMessage(error)
+  }
+}
+
+async function rotateEncryptionKey() {
+  if (
+    !window.confirm(
+      'Rotate the encryption key and rebuild all cloud data from this device? Make sure this device has every note and attachment, and close the app on other devices. Other devices will need the new key. Local notes, IDs, and timestamps will not change.\n\nContinue?',
+    )
+  )
+    return
+
+  rotatingKey.value = true
+  try {
+    await cloudSync.rotateKey()
+    encryptionKeyVisible.value = true
+    encryptionKeyCopied.value = false
+    message.value = 'Encryption key rotated. Cloud data is rebuilding.'
+  } catch (error) {
+    message.value = errorMessage(error)
+  } finally {
+    rotatingKey.value = false
   }
 }
 
@@ -126,6 +204,73 @@ function errorMessage(error: unknown) {
           Sync now
         </button>
         <p v-if="message" class="mt-3 text-red-600">{{ message }}</p>
+
+        <h3 class="mt-5 font-medium">Encryption key</h3>
+        <p v-if="vault.state === 'ready'" class="mt-1 text-sm text-stone-500">
+          The recovery key decrypts every cloud note and resource. Keep it outside this application.
+        </p>
+        <p v-else class="mt-1 text-sm text-stone-500">Add an encryption key to synchronize notes with the cloud.</p>
+        <template v-if="vault.state === 'ready'">
+          <div class="mt-2 w-full rounded-lg border border-stone-200 px-3 py-2 font-mono text-sm break-all">
+            {{ encryptionKeyVisible ? vault.secret : vault.secret.replace(/[^-]/g, '•') }}
+          </div>
+          <div class="mt-2 flex flex-wrap">
+            <button
+              class="w-20 cursor-pointer rounded-lg px-3 py-2 text-center hover:bg-stone-100"
+              type="button"
+              @click="encryptionKeyVisible = !encryptionKeyVisible"
+            >
+              {{ encryptionKeyVisible ? 'Hide' : 'Reveal' }}
+            </button>
+            <button
+              class="flex w-20 cursor-pointer items-center justify-center gap-1 rounded-lg px-3 py-2 hover:bg-stone-100"
+              :class="{ 'text-green-600': encryptionKeyCopied }"
+              type="button"
+              @click="copyEncryptionKey"
+            >
+              Copy
+              <IconCheck class="size-4" :class="{ invisible: !encryptionKeyCopied }" />
+            </button>
+            <button
+              class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
+              type="button"
+              @click="vault.download"
+            >
+              Download key
+            </button>
+            <button
+              class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
+              type="button"
+              @click="changeEncryptionKey"
+            >
+              Change key
+            </button>
+            <button
+              class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
+              type="button"
+              :disabled="rotatingKey || notes.syncing"
+              @click="rotateEncryptionKey"
+            >
+              {{ rotatingKey ? 'Rotating…' : 'Rotate key' }}
+            </button>
+          </div>
+        </template>
+        <div v-else-if="vault.state === 'missing'" class="mt-2 flex flex-wrap">
+          <button
+            class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
+            type="button"
+            @click="createEncryptionKey"
+          >
+            Create new key
+          </button>
+          <button
+            class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
+            type="button"
+            @click="importEncryptionKey"
+          >
+            Import key
+          </button>
+        </div>
 
         <h3 v-if="auth.status?.sessions.length" class="mt-5 font-medium">Signed-in sessions</h3>
         <ul v-if="auth.status?.sessions.length" class="mt-2 space-y-2">

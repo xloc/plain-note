@@ -12,6 +12,8 @@
   "dependencies": {
     "@floating-ui/vue": "^2.0.1",
     "@heroicons/vue": "^2.2.0",
+    "@noble/ciphers": "2.4.0",
+    "@noble/hashes": "2.4.0",
     "@tabler/icons-vue": "^3.46.0",
     "@tailwindcss/vite": "^4.3.3",
     "@varienos/device-detector-js": "^2.0.0",

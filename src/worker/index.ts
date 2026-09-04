@@ -1,17 +1,28 @@
-import type { ConflictResponse, DeleteNoteRequest, Note, NoteResource, PutNoteRequest, Tombstone } from '../shared/note'
+import type {
+  DeleteNoteRequest,
+  EncryptedNote,
+  PutEncryptedNoteRequest,
+  RebuildVaultRequest,
+  RemoteConflictResponse,
+  RemoteNoteRecord,
+  Tombstone,
+} from '../shared/note'
 import { createAppSession, type AuthEnv, requireAppSession, requireSameOrigin, sessionApi } from './auth'
-import { getChanges, recordChange } from './index-db'
+import { getChanges, rebuildIndex, recordChange } from './index-db'
+import { clearCleanupFailure, recordCleanupFailure } from './issues'
+import { json } from './response'
 import {
   cleanupExpiredResources,
   cleanupResources,
-  deleteResource,
+  clearNotes,
   getRecord,
   getResource,
   putNote,
   putResource,
   putTombstone,
 } from './storage'
-import { requireFreeTierCapacity, storageUsageResponse, type UsageEnv } from './usage'
+import { requireFreeTierCapacity, storageStatusResponse, type UsageEnv } from './usage'
+import { isVaultKeyId, replaceVaultKey, requireVaultKey } from './vault'
 
 type Env = AuthEnv &
   UsageEnv & {
@@ -42,21 +53,47 @@ export default {
     }
   },
   async scheduled(_controller, env) {
-    await cleanupExpiredResources(env.NOTES)
+    try {
+      await cleanupExpiredResources(env.NOTES)
+      await clearCleanupFailure(env.DB)
+    } catch (error) {
+      console.error('Scheduled resource cleanup failed', error)
+      try {
+        await recordCleanupFailure(env.DB)
+      } catch (issueError) {
+        console.error('Recording the cleanup failure failed', issueError)
+      }
+      throw error
+    }
   },
 } satisfies ExportedHandler<Env>
 
 async function api(request: Request, env: Env, url: URL) {
   if (request.method === 'GET' && url.pathname === '/api/health') return json({ ok: true })
-  if (request.method === 'GET' && url.pathname === '/api/usage') return storageUsageResponse(request, env)
+  if (request.method === 'GET' && url.pathname === '/api/storage') return storageStatusResponse(request, env)
 
   const usageError = await requireFreeTierCapacity(request, env)
   if (usageError) return usageError
+
+  const vaultError = await requireVaultKey(request, env.NOTES)
+  if (vaultError) return vaultError
 
   if (request.method === 'GET' && url.pathname === '/api/sync') {
     const after = Number(url.searchParams.get('after') ?? 0)
     const generation = url.searchParams.get('generation')
     return json(await getChanges(env, generation, Number.isFinite(after) ? after : 0))
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/vault/rebuild') {
+    const body = await request.json<RebuildVaultRequest>()
+    if (!isVaultKeyId(body.keyId)) return json({ error: 'invalid_vault_key' }, 400)
+
+    // Keep the old key active until the replaceable cloud copy has been cleared successfully.
+    await clearNotes(env.NOTES)
+    await rebuildIndex(env)
+    await clearCleanupFailure(env.DB)
+    await replaceVaultKey(env.NOTES, body.keyId)
+    return json({ ok: true })
   }
 
   const resourceMatch = url.pathname.match(/^\/api\/notes\/([A-Za-z0-9_-]+)\/resources\/([A-Za-z0-9_-]+)$/)
@@ -92,64 +129,27 @@ async function readResource(env: Env, noteId: string, id: string) {
   const headers = new Headers({
     'Cache-Control': 'no-store',
     'Content-Length': String(object.size),
-    'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
+    'Content-Type': 'application/octet-stream',
   })
   return new Response(object.body, { headers })
 }
 
 async function writeResource(request: Request, env: Env, noteId: string, id: string) {
   if (!request.body) return json({ error: 'invalid_resource' }, 400)
-
-  const encodedName = request.headers.get('X-Resource-Name')
-  const size = Number(request.headers.get('X-Resource-Size'))
-  const createdAt = Number(request.headers.get('X-Resource-Created-At'))
-  if (!encodedName || !Number.isSafeInteger(size) || size < 0 || !Number.isSafeInteger(createdAt))
-    return json({ error: 'invalid_resource' }, 400)
-
-  let name: string
-  try {
-    name = decodeURIComponent(encodedName)
-  } catch {
-    return json({ error: 'invalid_resource' }, 400)
-  }
-
-  const resource: NoteResource = {
-    id,
-    name,
-    mime: request.headers.get('Content-Type') ?? 'application/octet-stream',
-    size,
-    createdAt,
-  }
-  const stored = await putResource(env.NOTES, noteId, resource, request.body)
-  if (!stored) {
-    // Idempotent retry: accept the existing object only when its metadata matches.
-    const existing = await getResource(env.NOTES, noteId, id)
-    const same =
-      existing?.size === resource.size &&
-      existing.httpMetadata?.contentType === resource.mime &&
-      existing.customMetadata?.name === encodeURIComponent(resource.name) &&
-      existing.customMetadata?.createdAt === String(resource.createdAt)
-    if (!same) return json({ error: 'resource_conflict' }, 409)
-  } else if (stored.size !== resource.size) {
-    await deleteResource(env.NOTES, noteId, id)
-    return json({ error: 'invalid_resource' }, 400)
-  }
-  return json({ resource })
+  await putResource(env.NOTES, noteId, id, request.body)
+  return json({ ok: true })
 }
 
 async function writeNote(request: Request, env: Env, id: string) {
-  const body = await request.json<PutNoteRequest>()
-  if (body.note.id !== id || body.note.revision === body.baseRevision) return json({ error: 'invalid_note' }, 400)
+  const body = await request.json<PutEncryptedNoteRequest>()
+  if (!isEncryptedNote(body.note) || body.note.id !== id || body.note.revision === body.baseRevision)
+    return json({ error: 'invalid_note' }, 400)
 
   const current = await getRecord(env.NOTES, id)
   // Idempotent retry: repeat indexing and cleanup before returning the stored result.
   if (current?.record.revision === body.note.revision && !('deleted' in current.record)) {
     await recordChange(env, current.record, current.etag)
-    await cleanupResources(
-      env.NOTES,
-      id,
-      current.record.resources.map((resource) => resource.id),
-    )
+    await cleanupAfterWrite(env, id, current.record.resourceIds)
     return json({ note: current.record })
   }
   if ((current?.record.revision ?? null) !== body.baseRevision) return conflict(current?.record ?? null)
@@ -158,15 +158,10 @@ async function writeNote(request: Request, env: Env, id: string) {
   if (!stored) return conflict((await getRecord(env.NOTES, id))?.record ?? null)
 
   await recordChange(env, body.note, stored.etag)
-  const previousIds =
-    current && !('deleted' in current.record) ? current.record.resources.map((resource) => resource.id) : []
-  const resourceIds = body.note.resources.map((resource) => resource.id)
-  await cleanupResources(
-    env.NOTES,
-    id,
-    resourceIds,
-    previousIds.filter((resourceId) => !resourceIds.includes(resourceId)),
-  )
+  const previousIds = current && !('deleted' in current.record) ? current.record.resourceIds : []
+  const currentIds = body.note.resourceIds
+  const toDelete = previousIds.filter((resourceId) => !currentIds.includes(resourceId))
+  await cleanupAfterWrite(env, id, currentIds, toDelete)
   return json({ note: body.note })
 }
 
@@ -178,7 +173,7 @@ async function deleteNote(request: Request, env: Env, id: string) {
   // Idempotent retry: repeat indexing and cleanup before returning the stored tombstone.
   if ('deleted' in current.record && current.record.revision === body.revision) {
     await recordChange(env, current.record, current.etag)
-    await cleanupResources(env.NOTES, id, [])
+    await cleanupAfterWrite(env, id, [])
     return json({ tombstone: current.record })
   }
   if (current.record.revision !== body.baseRevision) return conflict(current.record)
@@ -194,19 +189,25 @@ async function deleteNote(request: Request, env: Env, id: string) {
   if (!stored) return conflict((await getRecord(env.NOTES, id))?.record ?? null)
 
   await recordChange(env, tombstone, stored.etag)
-  const previousIds = 'deleted' in current.record ? [] : current.record.resources.map((resource) => resource.id)
-  await cleanupResources(env.NOTES, id, [], previousIds)
+  const previousIds = 'deleted' in current.record ? [] : current.record.resourceIds
+  await cleanupAfterWrite(env, id, [], previousIds)
   return json({ tombstone })
 }
 
-function conflict(current: Note | Tombstone | null) {
+function conflict(current: RemoteNoteRecord | null) {
   if (!current) return json({ error: 'not_found' }, 404)
-  return json({ error: 'conflict', current } satisfies ConflictResponse, 409)
+  return json({ error: 'conflict', current } satisfies RemoteConflictResponse, 409)
 }
 
-function json(value: unknown, status = 200) {
-  return Response.json(value, {
-    status,
-    headers: { 'Cache-Control': 'no-store' },
-  })
+async function cleanupAfterWrite(env: Env, noteId: string, referencedIds: string[], removedIds: string[] = []) {
+  try {
+    await cleanupResources(env.NOTES, noteId, referencedIds, removedIds)
+  } catch (error) {
+    console.error('Resource cleanup failed', { noteId, error })
+    await recordCleanupFailure(env.DB)
+  }
+}
+
+function isEncryptedNote(note: EncryptedNote | undefined): note is EncryptedNote {
+  return Boolean(note && Array.isArray(note.resourceIds) && typeof note.encrypted === 'string')
 }

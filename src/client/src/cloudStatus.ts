@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import { useAuthStore } from './stores/auth'
 import { useCloudSyncStore } from './stores/cloudSync'
 import { useNotesStore } from './stores/notes'
+import { useVaultStore } from './stores/vault'
 
 export type CloudStatusKind = 'off' | 'working' | 'pending' | 'synced' | 'error'
 
@@ -9,6 +10,7 @@ export function useCloudStatus() {
   const auth = useAuthStore()
   const notes = useNotesStore()
   const cloudSync = useCloudSyncStore()
+  const vault = useVaultStore()
 
   const status = computed(() => {
     if (!cloudSync.online || auth.state === 'offline')
@@ -20,6 +22,10 @@ export function useCloudStatus() {
       return { kind: 'off' as const, title: 'Offline', detail: 'Sign in to synchronize local changes with the cloud.' }
     if (auth.state === 'error')
       return { kind: 'error' as const, title: 'Cloud unavailable', detail: auth.message || 'Authentication failed.' }
+    if (vault.state === 'loading')
+      return { kind: 'working' as const, title: 'Connecting', detail: 'Loading the encryption key.' }
+    if (vault.state === 'missing')
+      return { kind: 'off' as const, title: 'Local only', detail: 'Add a key to sync with the cloud.' }
 
     if (notes.syncing) return { kind: 'working' as const, title: 'Syncing', detail: 'Sending and receiving changes.' }
     if (notes.syncMessage === 'Pending' || notes.selectedNote?.syncState === 'pending')

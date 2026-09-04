@@ -24,6 +24,7 @@ export const useNotesStore = defineStore('notes', () => {
   const activeNotes = computed(() =>
     notes.value.filter((note) => !note.deleted).sort((a, b) => b.updatedAt - a.updatedAt),
   )
+  const hasPending = computed(() => notes.value.some((note) => note.syncState === 'pending'))
   const selectedNote = computed(() => notes.value.find((note) => note.id === selectedId.value && !note.deleted))
 
   function saveNote(note: db.LocalNote) {
@@ -211,7 +212,7 @@ export const useNotesStore = defineStore('notes', () => {
     const local = await db.getResource(noteId, resource.id)
     if (local) return local.blob
 
-    const blob = await api.getResource(noteId, resource.id)
+    const blob = await api.getResource(noteId, resource)
     await db.saveResource({ ...resource, noteId, blob, syncState: 'synced' })
     return blob
   }
@@ -262,6 +263,15 @@ export const useNotesStore = defineStore('notes', () => {
     if (!selectedId.value) {
       await createNote()
     }
+  }
+
+  async function prepareCloudRebuild() {
+    for (const note of notes.value.filter((note) => !note.deleted)) {
+      note.syncState = 'pending'
+      await markResourcesPending(note.id, note.resources)
+      await saveNote(note)
+    }
+    notifyLocalChange()
   }
 
   async function sync() {
@@ -315,10 +325,14 @@ export const useNotesStore = defineStore('notes', () => {
           } else {
             const sent = toNote(candidate)
             await pushResources(candidate.id, sent.resources)
-            const { note: stored } = await api.putNote({
-              baseRevision: candidate.base?.revision ?? null,
-              note: sent,
-            })
+            const baseRevision = candidate.base?.revision === revision ? null : (candidate.base?.revision ?? null)
+            let stored: Note
+            try {
+              stored = (await api.putNote({ baseRevision, note: sent })).note
+            } catch (error) {
+              if (!(error instanceof api.ApiNotFound) || candidate.base === null) throw error
+              stored = (await api.putNote({ baseRevision: null, note: sent })).note
+            }
             const current = notes.value.find((note) => note.id === candidate.id)
             if (current) {
               await markResourcesSynced(candidate.id, sent.resources)
@@ -331,6 +345,10 @@ export const useNotesStore = defineStore('notes', () => {
           }
           break
         } catch (error) {
+          if (error instanceof api.ApiNotFound && candidate.deleted) {
+            await removeLocalNote(candidate.id)
+            break
+          }
           if (!(error instanceof api.ApiConflict)) throw error
 
           const current = notes.value.find((note) => note.id === candidate.id)
@@ -346,7 +364,7 @@ export const useNotesStore = defineStore('notes', () => {
     for (const resource of resources) {
       let local = await db.getResource(noteId, resource.id)
       if (!local) {
-        const blob = await api.getResource(noteId, resource.id)
+        const blob = await api.getResource(noteId, resource)
         local = { ...resource, noteId, blob, syncState: 'synced' }
         await db.saveResource(local)
       }
@@ -372,7 +390,7 @@ export const useNotesStore = defineStore('notes', () => {
       }
       for (const resource of note.resources) {
         if (await db.getResource(note.id, resource.id)) continue
-        const blob = await api.getResource(note.id, resource.id)
+        const blob = await api.getResource(note.id, resource)
         await db.saveResource({ ...resource, noteId: note.id, blob, syncState: 'synced' })
       }
     }
@@ -387,9 +405,12 @@ export const useNotesStore = defineStore('notes', () => {
       const response = await api.getChanges(generation, cursor)
       if (response.reset && firstPage) {
         const serverIds = new Set(response.changes.map((change) => change.id))
-        const obsolete = notes.value.filter((note) => note.syncState === 'synced' && !serverIds.has(note.id))
-        for (const note of obsolete) {
-          await removeLocalNote(note.id)
+        const missing = notes.value.filter((note) => note.syncState === 'synced' && !serverIds.has(note.id))
+        for (const note of missing) {
+          // A generation invalidates the sync cursor, not note identities. Restore local-only notes with the same UUID.
+          note.syncState = 'pending'
+          await markResourcesPending(note.id, note.resources)
+          await saveNote(note)
         }
       }
       for (const change of response.changes) {
@@ -518,6 +539,7 @@ export const useNotesStore = defineStore('notes', () => {
     syncRequest,
     resourceProgress,
     activeNotes,
+    hasPending,
     selectedNote,
     initialize,
     createNote,
@@ -532,6 +554,7 @@ export const useNotesStore = defineStore('notes', () => {
     select,
     resetLocalData,
     ensureNote,
+    prepareCloudRebuild,
     sync,
   }
 })

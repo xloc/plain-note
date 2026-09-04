@@ -29,3 +29,7 @@ Each successful sign-in creates a separate session. It records a readable device
 The label helps people recognize a session, but it does not identify a physical device or group sessions. Someone who still has Cloudflare Access can sign in again after a session is revoked.
 
 Local development uses a built-in identity instead of Cloudflare. It still creates and validates both app session secrets. The cookie omits `Secure` because the local server uses HTTP.
+
+## Encryption
+
+Authentication controls access to the API but never supplies or stores the vault encryption key. Each trusted browser imports the same recovery key independently. Revoking a session prevents future API access but cannot erase plaintext or keys already held by that browser.

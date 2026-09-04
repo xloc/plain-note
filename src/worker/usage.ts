@@ -1,5 +1,8 @@
-import type { StorageUsage } from '../shared/note'
+import type { StorageStatus } from '../shared/note'
 import { isLocalRequest } from './environment.ts'
+import { referencedResourceCount } from './index-db.ts'
+import { getServerIssues } from './issues.ts'
+import { error, json } from './response.ts'
 
 export type UsageEnv = {
   CLOUDFLARE_ACCOUNT_ID?: string
@@ -56,41 +59,48 @@ const r2ClassB = new Set([
 ])
 const r2Free = new Set(['AbortMultipartUpload', 'DeleteBucket', 'DeleteObject'])
 const usageCache = new Map<string, { expiresAt: number; value: Promise<Usage> }>()
+const inventoryCache = new WeakMap<object, { expiresAt: number; value: StorageInventory }>()
 
-export async function storageUsageResponse(request: Request, env: UsageEnv & { NOTES: R2Bucket }) {
-  if (isLocalRequest(request)) {
-    try {
-      return Response.json(await getLocalStorageUsage(env.NOTES), { headers: { 'Cache-Control': 'no-store' } })
-    } catch {
-      return error('usage_unavailable', 503)
-    }
+export async function storageStatusResponse(request: Request, env: UsageEnv & { DB: D1Database; NOTES: R2Bucket }) {
+  const local = isLocalRequest(request)
+  if (!local && (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_USAGE_TOKEN)) {
+    return error('usage_not_configured', 500)
   }
 
-  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_USAGE_TOKEN) return error('usage_not_configured', 500)
-
   try {
-    const usage = await getUsage(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_USAGE_TOKEN)
-    return Response.json(
-      {
-        usedBytes: usage.r2StorageBytes,
-        limitBytes: limits.r2StorageBytes,
-        cutoffBytes: limits.r2StorageBytes * CUTOFF,
-      } satisfies StorageUsage,
-      { headers: { 'Cache-Control': 'no-store' } },
-    )
+    const [inventory, referencedResources, issues] = await Promise.all([
+      getStorageInventory(env.NOTES),
+      referencedResourceCount(env),
+      getServerIssues(env.DB),
+    ])
+    const limitBytes = local ? DEFAULT_DEV_R2_STORAGE_LIMIT_BYTES : limits.r2StorageBytes
+    const usedBytes = local
+      ? inventory.usedBytes
+      : (await getUsage(env.CLOUDFLARE_ACCOUNT_ID!, env.CLOUDFLARE_USAGE_TOKEN!)).r2StorageBytes
+
+    return json({
+      usedBytes,
+      limitBytes,
+      cutoffBytes: limitBytes * CUTOFF,
+      referencedResources,
+      storedResources: inventory.storedResources,
+      issues,
+    } satisfies StorageStatus)
   } catch {
-    return error('usage_unavailable', 503)
+    return error('storage_unavailable', 503)
   }
 }
 
 export async function requireFreeTierCapacity(request: Request, env: UsageEnv & { NOTES: R2Bucket }) {
-  if (new URL(request.url).pathname === '/api/health') return null
+  const path = new URL(request.url).pathname
+  if (path === '/api/health') return null
 
   if (isLocalRequest(request)) {
     if (!isMutation(request)) return null
     try {
-      const usage = await getLocalStorageUsage(env.NOTES)
-      return usage.usedBytes >= usage.cutoffBytes ? limitError('r2_storage') : null
+      const inventory = await getStorageInventory(env.NOTES)
+      if (inventory.usedBytes >= DEFAULT_DEV_R2_STORAGE_LIMIT_BYTES * CUTOFF) return limitError('r2_storage')
+      return null
     } catch {
       return error('usage_unavailable', 503)
     }
@@ -123,17 +133,23 @@ export function blockedLimit(request: Request, usage: Usage) {
   return null
 }
 
-async function getLocalStorageUsage(bucket: R2Bucket): Promise<StorageUsage> {
+async function getStorageInventory(bucket: R2Bucket) {
+  const cached = inventoryCache.get(bucket)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+
   let usedBytes = 0
+  let storedResources = 0
   let cursor: string | undefined
   do {
     const page = await bucket.list(cursor ? { cursor } : {})
     usedBytes += page.objects.reduce((total, object) => total + object.size, 0)
+    storedResources += page.objects.filter((object) => /^notes\/[^/]+\/resources\/[^/]+$/.test(object.key)).length
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
 
-  const limitBytes = DEFAULT_DEV_R2_STORAGE_LIMIT_BYTES
-  return { usedBytes, limitBytes, cutoffBytes: limitBytes * CUTOFF }
+  const value = { usedBytes, storedResources }
+  inventoryCache.set(bucket, { expiresAt: Date.now() + CACHE_MS, value })
+  return value
 }
 
 function isMutation(request: Request) {
@@ -142,10 +158,7 @@ function isMutation(request: Request) {
 }
 
 function limitError(limit: string) {
-  return Response.json(
-    { error: 'free_tier_limit_near', limit },
-    { status: 503, headers: { 'Cache-Control': 'no-store' } },
-  )
+  return json({ error: 'free_tier_limit_near', limit }, 503)
 }
 
 async function getUsage(accountId: string, token: string) {
@@ -262,16 +275,6 @@ function storageBytes(metrics?: R2StorageClass) {
   )
 }
 
-function error(message: string, status: number) {
-  return Response.json(
-    { error: message },
-    {
-      status,
-      headers: { 'Cache-Control': 'no-store' },
-    },
-  )
-}
-
 type Analytics = {
   d1: { sum: { rowsRead?: number; rowsWritten?: number } }[]
   r2: { dimensions: { actionType: string }; sum: { requests?: number } }[]
@@ -285,4 +288,9 @@ type R2StorageClass = {
 type R2Metrics = {
   infrequentAccess?: R2StorageClass
   standard?: R2StorageClass
+}
+
+type StorageInventory = {
+  usedBytes: number
+  storedResources: number
 }

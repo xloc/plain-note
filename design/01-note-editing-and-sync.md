@@ -28,6 +28,8 @@ DELETE /api/notes/<id>
 
 The sync response contains the current D1 generation, a cursor, and changed note identifiers. A generation mismatch returns a complete index snapshot and tells the client to reset its cursor.
 
+Generation does not define note identity. A local note missing from a reset snapshot keeps its UUID and is uploaded; only an explicit tombstone deletes it.
+
 ## Storage decisions
 
 - A logical note has one stable R2 key: `notes/<id>/note.md`.
@@ -36,6 +38,8 @@ The sync response contains the current D1 generation, a cursor, and changed note
 - D1 contains only the note index, change journal, and schema/generation metadata.
 - A D1 schema-version mismatch drops and rebuilds derived tables by scanning R2. There are no migration scripts.
 - IndexedDB keeps the complete synchronized base record for every server-backed local note.
+
+End-to-end encryption is added in [Client-Side Encryption](06-client-side-encryption.md). R2 then stores the encrypted version of the note.
 
 ## Definition of done
 
