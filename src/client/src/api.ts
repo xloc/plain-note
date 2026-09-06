@@ -110,7 +110,7 @@ export async function getChanges(generation: string | null, after: number) {
   return api<SyncResponse>(`/api/sync?${query}`)
 }
 
-export async function rebuildVault(keyId: string) {
+export async function rebuildVault(keyId = currentVault().id) {
   return api<{ ok: true }>('/api/vault/rebuild', {
     method: 'POST',
     body: JSON.stringify({ keyId } satisfies RebuildVaultRequest),

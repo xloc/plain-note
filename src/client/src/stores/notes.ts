@@ -293,13 +293,56 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
-  async function prepareCloudRebuild() {
+  async function prepareCloudRebuild(confirmMissing: (names: string[]) => boolean) {
+    const missing = new Map<string, Set<string>>()
     for (const note of notes.value.filter((note) => !note.deleted)) {
+      for (const resource of note.resources) {
+        if (!(await db.getResource(note.id, resource.id))) {
+          const ids = missing.get(note.id) ?? new Set<string>()
+          ids.add(resource.id)
+          missing.set(note.id, ids)
+        }
+      }
+    }
+    const names = notes.value.flatMap((note) =>
+      note.resources.filter((resource) => missing.get(note.id)?.has(resource.id)).map((resource) => resource.name),
+    )
+    if (names.length && !confirmMissing(names)) return false
+
+    for (const note of notes.value.filter((note) => !note.deleted)) {
+      // Missing blobs cannot be uploaded after the old cloud copy is cleared.
+      note.resources = note.resources.filter((resource) => !missing.get(note.id)?.has(resource.id))
       note.syncState = 'pending'
       await markResourcesPending(note.id, note.resources)
       await saveNote(note)
     }
-    notifyLocalChange()
+    return true
+  }
+
+  async function uploadCloudRebuild() {
+    if (!editable.value || syncing.value) return
+    syncing.value = true
+    syncMessage.value = 'Rebuilding'
+    try {
+      // The cloud is empty: old bases and local tombstones must not trigger server reads or conflicts.
+      for (const note of notes.value.filter((note) => !note.deleted)) {
+        note.base = null
+        await saveNote(note)
+      }
+      for (const note of notes.value.filter((note) => note.deleted)) await removeLocalNote(note.id)
+      await pushPending()
+      if (hasPending.value) {
+        syncMessage.value = 'Pending'
+        notifyLocalChange()
+      } else {
+        syncMessage.value = 'Synced'
+      }
+    } catch (error) {
+      syncMessage.value = error instanceof Error ? error.message : 'Cloud rebuild failed'
+      throw error
+    } finally {
+      syncing.value = false
+    }
   }
 
   async function sync() {
@@ -614,6 +657,7 @@ export const useNotesStore = defineStore('notes', () => {
     resetLocalData,
     ensureNote,
     prepareCloudRebuild,
+    uploadCloudRebuild,
     sync,
   }
 })

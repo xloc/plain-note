@@ -62,6 +62,7 @@ class Bucket {
 class DB {
   cleanupFailures = 0
   lastCleanupFailure = 0
+  rebuildSessionId = null
 
   async batch(statements) {
     for (const statement of statements) await statement.run()
@@ -76,6 +77,7 @@ class DB {
         return this
       },
       async run() {
+        if (source.includes('WHERE id <> ?')) db.rebuildSessionId = values[1]
         if (source.includes('INSERT INTO server_issues')) {
           db.cleanupFailures += 1
           db.lastCleanupFailure = values[1]
@@ -196,7 +198,8 @@ test('rejects an invalid clear update timestamp', async () => {
 
 test('rebuilds the cloud vault with a new key identifier', async () => {
   const bucket = new Bucket()
-  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const db = new DB()
+  const env = { DB: db, NOTES: bucket, TEST_AUTH_BYPASS: true }
   const resourceUrl = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
   await worker.fetch(new Request(resourceUrl, { method: 'PUT', headers: vaultHeaders, body: 'ciphertext' }), env)
   await putNote(
@@ -223,6 +226,7 @@ test('rebuilds the cloud vault with a new key identifier', async () => {
 
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({ ok: true })
+  expect(db.rebuildSessionId).toBe('test')
   expect([...bucket.objects.keys()]).toEqual(['vault/key.json'])
   const retry = await worker.fetch(
     new Request('http://localhost:8787/api/vault/rebuild', {
@@ -254,6 +258,34 @@ test('rebuilds the cloud vault with a new key identifier', async () => {
       )
     ).status,
   ).toBe(200)
+})
+
+test('rebuilds legacy cloud data with the current key without parsing it', async () => {
+  const bucket = new Bucket()
+  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  await worker.fetch(
+    new Request('http://localhost:8787/api/notes/note-id/resources/resource-id', {
+      method: 'PUT',
+      headers: vaultHeaders,
+      body: 'ciphertext',
+    }),
+    env,
+  )
+  await bucket.put('notes/note-id/note.md', 'legacy plaintext', {
+    customMetadata: { kind: 'note', revision: 'legacy-revision' },
+  })
+
+  const response = await worker.fetch(
+    new Request('http://localhost:8787/api/vault/rebuild', {
+      method: 'POST',
+      headers: { ...vaultHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyId: vaultHeaders['X-Vault-Key-Id'] }),
+    }),
+    env,
+  )
+
+  expect(response.status).toBe(200)
+  expect([...bucket.objects.keys()]).toEqual(['vault/key.json'])
 })
 
 test('cleans up expired unreferenced uploads', async () => {

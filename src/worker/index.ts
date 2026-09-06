@@ -7,7 +7,14 @@ import type {
   RemoteNoteRecord,
   Tombstone,
 } from '../shared/note'
-import { createAppSession, type AuthEnv, requireAppSession, requireSameOrigin, sessionApi } from './auth'
+import {
+  createAppSession,
+  type AuthEnv,
+  requireAppSession,
+  requireSameOrigin,
+  revokeOtherSessions,
+  sessionApi,
+} from './auth'
 import { getChanges, rebuildIndex, recordChange } from './index-db'
 import { clearCleanupFailure, recordCleanupFailure } from './issues'
 import { json } from './response'
@@ -45,7 +52,7 @@ export default {
       const session = await requireAppSession(request, env)
       if (session instanceof Response) return session
       if (url.pathname.startsWith('/api/auth/')) return await sessionApi(request, env, url, session)
-      return await api(request, env, url)
+      return await api(request, env, url, session.id)
     } catch (error) {
       console.error(error)
       return json({ error: 'internal_error' }, 500)
@@ -67,14 +74,14 @@ export default {
   },
 } satisfies ExportedHandler<Env>
 
-async function api(request: Request, env: Env, url: URL) {
+async function api(request: Request, env: Env, url: URL, sessionId: string) {
   if (request.method === 'GET' && url.pathname === '/api/health') return json({ ok: true })
   if (request.method === 'GET' && url.pathname === '/api/storage') return storageStatusResponse(request, env)
 
   const usageError = await requireFreeTierCapacity(request, env)
   if (usageError) return usageError
 
-  if (request.method === 'POST' && url.pathname === '/api/vault/rebuild') return rebuildVault(request, env)
+  if (request.method === 'POST' && url.pathname === '/api/vault/rebuild') return rebuildVault(request, env, sessionId)
 
   const vaultError = await requireVaultKey(request, env.NOTES)
   if (vaultError) return vaultError
@@ -104,7 +111,7 @@ async function api(request: Request, env: Env, url: URL) {
   return json({ error: 'method_not_allowed' }, 405)
 }
 
-async function rebuildVault(request: Request, env: Env) {
+async function rebuildVault(request: Request, env: Env, sessionId: string) {
   const value = await request.json<unknown>()
   if (!value || typeof value !== 'object' || !isVaultKeyId((value as Partial<RebuildVaultRequest>).keyId)) {
     return json({ error: 'invalid_vault_key' }, 400)
@@ -117,6 +124,8 @@ async function rebuildVault(request: Request, env: Env) {
     return vaultError
   }
 
+  // Stop other browsers from uploading stale data while this device replaces the cloud copy.
+  await revokeOtherSessions(env.DB, sessionId)
   // Keep the old key active until the replaceable cloud copy has been cleared successfully.
   await clearNotes(env.NOTES)
   await rebuildIndex(env)

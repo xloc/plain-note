@@ -12,6 +12,7 @@ Protect cloud-stored notes and resources from disclosure through leaked R2 data,
 - Other devices join the vault by importing that recovery key.
 - Importing a key does not rewrite unchanged notes or alter their update times.
 - Losing every copy of the recovery key makes the cloud data unrecoverable.
+- A complete device can explicitly discard and rebuild the cloud copy without changing note timestamps or the recovery key.
 
 ## Trust model
 
@@ -72,6 +73,8 @@ The client encrypts a complete plaintext note immediately before upload and decr
 
 - Importing a recovery key does not change or upload local notes.
 - Conflicting user edits merge normally, and the merged note uploads later.
+
+Rebuilding the cloud treats the selected device as authoritative. It verifies that every referenced attachment exists locally, then the server revokes every other app session before clearing R2 and the derived D1 index. The client uploads every active local note and attachment with the current key without pulling cloud records. Cloud-only data is intentionally discarded.
 
 ### Cleanup
 

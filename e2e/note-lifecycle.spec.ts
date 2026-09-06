@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { focusDocument, importMarkdown, pauseForDemo, typeText, writeLoremNote } from './note-helpers'
 
 const initialKey = 'pn1-11111-11111-11111-11111-11111-11111-11'
@@ -118,6 +118,109 @@ test('synchronizes an encrypted cloud envelope', async ({ page }) => {
   expect(JSON.stringify(remote)).not.toContain('Server must not see this sentence')
 })
 
+test('warns before rebuilding without a local attachment and signs out other sessions', async ({ browser, page }) => {
+  await page.goto('/')
+  await page.locator('article header').getByTitle('Offline').click()
+  const cloudDialog = page.getByRole('dialog')
+  const firstVaultRequest = page.waitForRequest((request) => request.headers()['x-vault-key-id'] !== undefined)
+  await cloudDialog.getByRole('button', { name: 'Sign in to view sessions' }).click()
+  const keyId = (await firstVaultRequest).headers()['x-vault-key-id']!
+  await cloudDialog.getByTitle('Close').click()
+
+  const editor = page.locator('.ProseMirror')
+  await page.locator('article header').getByTitle('New note').click()
+  await focusDocument(page.locator('.editor-scroll'))
+  await typeText(editor, '# Rebuild warning')
+  const transfer = await page.evaluateHandle(() => {
+    const value = new DataTransfer()
+    value.items.add(new File(['cloud-only bytes'], 'cloud-only.txt', { type: 'text/plain' }))
+    return value
+  })
+  await page.locator('.editor-scroll').dispatchEvent('drop', { dataTransfer: transfer })
+  await transfer.dispose()
+  await expect(editor.getByText('cloud-only.txt')).toBeVisible()
+  await expect(page.locator('article header').getByTitle('Synced')).toBeVisible()
+
+  const noteId = new URL(page.url()).pathname.split('/').at(-1)!
+  const before = await encryptedNote(page, noteId, keyId)
+  const resourceId = before.resourceIds[0]!
+  const otherDevice = await browser.newContext()
+  await otherDevice.addInitScript((key) => localStorage.setItem('plain-note:vault-key', key), initialKey)
+  const otherPage = await otherDevice.newPage()
+
+  try {
+    await otherPage.goto('/')
+    await otherPage.locator('article header').getByTitle('Offline').click()
+    const otherCloudDialog = otherPage.getByRole('dialog')
+    await otherCloudDialog.getByRole('button', { name: 'Sign in to view sessions' }).click()
+    await otherCloudDialog.getByTitle('Close').click()
+    await expect(otherPage.locator('article header').getByTitle('Synced')).toBeVisible()
+    expect(await authStatus(page)).toBe(200)
+    expect(await authStatus(otherPage)).toBe(200)
+
+    await deleteLocalResource(page, noteId, resourceId)
+
+    await page.locator('article header').getByTitle('Synced').click()
+    const rebuildButton = cloudDialog.getByRole('button', { name: 'Rebuild cloud from this device' })
+    let rebuildRequests = 0
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/vault/rebuild') rebuildRequests++
+    })
+
+    await answerRebuildDialogs(page, rebuildButton, false)
+
+    expect(rebuildRequests).toBe(0)
+    expect(await encryptedNote(page, noteId, keyId)).toMatchObject({
+      revision: before.revision,
+      updatedAt: before.updatedAt,
+      resourceIds: [resourceId],
+    })
+    expect(await remoteResourceStatus(page, noteId, resourceId, keyId)).toBe(200)
+    expect((await localNote(page, noteId)).resources).toHaveLength(1)
+
+    const rebuilt = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/api/vault/rebuild' && response.ok(),
+    )
+    await answerRebuildDialogs(page, rebuildButton, true)
+    await rebuilt
+    await expect(cloudDialog.getByText('Cloud data rebuilt from this device.')).toBeVisible()
+
+    expect(rebuildRequests).toBe(1)
+    const after = await encryptedNote(page, noteId, keyId)
+    expect(after).toMatchObject({
+      revision: before.revision,
+      updatedAt: before.updatedAt,
+      resourceIds: [],
+    })
+    expect(await remoteResourceStatus(page, noteId, resourceId, keyId)).toBe(404)
+    expect((await localNote(page, noteId)).resources).toEqual([])
+    expect(await authStatus(page)).toBe(200)
+
+    const rejectedUpload = await otherPage.evaluate(
+      async ({ noteId, keyId, note }) => {
+        const response = await fetch(`/api/notes/${noteId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-Vault-Key-Id': keyId },
+          body: JSON.stringify({
+            baseRevision: note.revision,
+            note: { ...note, revision: crypto.randomUUID(), updatedAt: note.updatedAt + 1 },
+          }),
+        })
+        return { status: response.status, body: await response.json() }
+      },
+      { noteId, keyId, note: after },
+    )
+    expect(rejectedUpload).toEqual({ status: 401, body: { error: 'session_required' } })
+    expect(await encryptedNote(page, noteId, keyId)).toEqual(after)
+
+    await otherPage.reload()
+    await otherPage.locator('article header').getByTitle('Offline').click()
+    await expect(otherPage.getByRole('dialog').getByRole('button', { name: 'Sign in to view sessions' })).toBeVisible()
+  } finally {
+    await otherDevice.close()
+  }
+})
+
 test('rotates the encryption key and rebuilds the cloud vault', async ({ browser, page }) => {
   await page.goto('/')
   await page.locator('article header').getByTitle('Offline').click()
@@ -158,7 +261,7 @@ test('rotates the encryption key and rebuilds the cloud vault', async ({ browser
   await cloudDialog.getByRole('button', { name: 'Rotate key' }).click()
   const newKeyId = (await rebuildRequest).postDataJSON().keyId as string
 
-  await expect(cloudDialog.getByText('Encryption key rotated. Cloud data is rebuilding.')).toBeVisible()
+  await expect(cloudDialog.getByText('Encryption key rotated and cloud data rebuilt.')).toBeVisible()
   const newKey = (await cloudDialog.locator('.font-mono').textContent())!.trim()
   expect(newKey).not.toBe(initialKey)
   expect(newKeyId).not.toBe(oldKeyId)
@@ -226,10 +329,96 @@ async function encryptedVault(page: Page, noteId: string, keyId: string) {
   )
 }
 
+async function encryptedNote(page: Page, noteId: string, keyId: string) {
+  return page.evaluate(
+    async ({ noteId, keyId }) => {
+      const response = await fetch(`/api/notes/${noteId}`, { headers: { 'X-Vault-Key-Id': keyId } })
+      if (!response.ok) throw new Error(`Reading encrypted note failed with ${response.status}`)
+      return (await response.json()).note as {
+        id: string
+        revision: string
+        updatedAt: number
+        resourceIds: string[]
+        encrypted: string
+      }
+    },
+    { noteId, keyId },
+  )
+}
+
+async function answerRebuildDialogs(page: Page, button: Locator, continueRebuild: boolean) {
+  const initialDialog = page.waitForEvent('dialog')
+  const clicked = button.click()
+  const initial = await initialDialog
+  expect(initial.message()).toContain('Permanently replace all cloud notes and attachments')
+
+  const missingDialog = page.waitForEvent('dialog')
+  await initial.accept()
+  const missing = await missingDialog
+  expect(missing.message()).toContain('Some attachments are not stored on this device:')
+  expect(missing.message()).toContain('• cloud-only.txt')
+  if (continueRebuild) await missing.accept()
+  else await missing.dismiss()
+  await clicked
+}
+
+async function deleteLocalResource(page: Page, noteId: string, resourceId: string) {
+  await page.evaluate(
+    ({ noteId, resourceId }) =>
+      new Promise<void>((resolve, reject) => {
+        const opened = indexedDB.open('plain-note', 5)
+        opened.onerror = () => reject(opened.error)
+        opened.onsuccess = () => {
+          const transaction = opened.result.transaction('resources', 'readwrite')
+          transaction.objectStore('resources').delete([noteId, resourceId])
+          transaction.oncomplete = () => {
+            opened.result.close()
+            resolve()
+          }
+          transaction.onerror = () => reject(transaction.error)
+        }
+      }),
+    { noteId, resourceId },
+  )
+}
+
+async function localNote(page: Page, noteId: string) {
+  return page.evaluate(
+    (noteId) =>
+      new Promise<{ resources: { id: string }[] }>((resolve, reject) => {
+        const opened = indexedDB.open('plain-note', 5)
+        opened.onerror = () => reject(opened.error)
+        opened.onsuccess = () => {
+          const request = opened.result.transaction('notes').objectStore('notes').get(noteId)
+          request.onsuccess = () => {
+            opened.result.close()
+            resolve(request.result)
+          }
+          request.onerror = () => reject(request.error)
+        }
+      }),
+    noteId,
+  )
+}
+
+async function remoteResourceStatus(page: Page, noteId: string, resourceId: string, keyId: string) {
+  return page.evaluate(
+    ({ noteId, resourceId, keyId }) =>
+      fetch(`/api/notes/${noteId}/resources/${resourceId}`, {
+        headers: { 'X-Vault-Key-Id': keyId },
+      }).then((response) => response.status),
+    { noteId, resourceId, keyId },
+  )
+}
+
 async function remoteStatus(page: Page, noteId: string, keyId: string) {
   return page.evaluate(
     ({ noteId, keyId }) =>
       fetch(`/api/notes/${noteId}`, { headers: { 'X-Vault-Key-Id': keyId } }).then((response) => response.status),
     { noteId, keyId },
   )
+}
+
+async function authStatus(page: Page) {
+  return page.evaluate(() => fetch('/api/auth/status').then((response) => response.status))
 }

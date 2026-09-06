@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
-import { createAppSession, requireAppSession, requireSameOrigin, sessionApi } from './auth.ts'
+import { createAppSession, requireAppSession, requireSameOrigin, revokeOtherSessions, sessionApi } from './auth.ts'
 
 test('creates and requires a real app session locally', async () => {
   const DB = new MemoryDatabase()
@@ -59,6 +59,32 @@ test('requires an app session for deployed API requests', async () => {
   assert.deepEqual(await response.json(), { error: 'session_required' })
 })
 
+test('revokes every app session except the one rebuilding the cloud', async () => {
+  const DB = new MemoryDatabase()
+  const env = { DB }
+  const create = (name) =>
+    createAppSession(
+      new Request('http://localhost:8787/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      }),
+      env,
+    )
+  const current = await create('Current browser')
+  const other = await create('Other browser')
+  const [currentId, otherId] = DB.sessions.keys()
+
+  await revokeOtherSessions(DB, currentId)
+
+  assert.equal(DB.sessions.get(currentId).revokedAt, null)
+  assert.equal(typeof DB.sessions.get(otherId).revokedAt, 'number')
+  assert.deepEqual(await requireAppSession(sessionRequest(current), env), { id: currentId })
+  const rejected = await requireAppSession(sessionRequest(other), env)
+  assert.equal(rejected.status, 401)
+  assert.deepEqual(await rejected.json(), { error: 'session_required' })
+})
+
 test('checks same-origin writes', () => {
   assert.equal(requireSameOrigin(new Request('https://notes.example.com/api/health')), null)
   assert.equal(
@@ -109,10 +135,7 @@ test('creates opaque cookie sessions for identities allowed by Access', async ()
     assert.equal(created.status, 200)
     const setCookie = created.headers.get('Set-Cookie')
     assert.match(setCookie, /PlainNoteSession=[^;]+; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000; Secure/)
-    assert.match(
-      setCookie,
-      /PlainNoteClientSession=[^;]+; SameSite=Strict; Path=\/; Max-Age=2592000; Secure/,
-    )
+    assert.match(setCookie, /PlainNoteClientSession=[^;]+; SameSite=Strict; Path=\/; Max-Age=2592000; Secure/)
     const token = setCookie.match(/PlainNoteSession=([^;]+)/)[1]
     const clientKey = setCookie.match(/PlainNoteClientSession=([^;]+)/)[1]
     assert.notEqual([...DB.sessions.values()][0].tokenHash, token)
@@ -180,6 +203,16 @@ function accessToken(privateKey, teamDomain, sub) {
     .sign(privateKey)
 }
 
+function sessionRequest(response) {
+  const setCookie = response.headers.get('Set-Cookie')
+  const token = setCookie.match(/PlainNoteSession=([^;]+)/)[1]
+  const clientKey = setCookie.match(/PlainNoteClientSession=([^;]+)/)[1]
+  return new Request('http://localhost:8787/api/notes/note-id', {
+    method: 'PUT',
+    headers: { Cookie: `PlainNoteSession=${token}; PlainNoteClientSession=${clientKey}` },
+  })
+}
+
 class MemoryDatabase {
   sessions = new Map()
 
@@ -217,6 +250,11 @@ class MemoryStatement {
         expiresAt,
         revokedAt: null,
       })
+    } else if (this.query.includes('WHERE id <> ?')) {
+      const [revokedAt, currentSessionId] = this.values
+      for (const session of this.database.sessions.values()) {
+        if (session.id !== currentSessionId && session.revokedAt === null) session.revokedAt = revokedAt
+      }
     } else if (this.query.startsWith('UPDATE auth_sessions SET revoked_at')) {
       const [revokedAt, id] = this.values
       const session = this.database.sessions.get(id)

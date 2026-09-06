@@ -57,7 +57,13 @@ const r2ClassB = new Set([
   'HeadObject',
   'UsageSummary',
 ])
-const r2Free = new Set(['AbortMultipartUpload', 'DeleteBucket', 'DeleteObject'])
+const r2Free = new Set([
+  'AbortMultipartUpload',
+  'DeleteBucket',
+  'DeleteObject',
+  'GetBucketNotificationConfiguration',
+  'GetBucketSippyConfiguration',
+])
 const usageCache = new Map<string, { expiresAt: number; value: Promise<Usage> }>()
 const inventoryCache = new WeakMap<object, { expiresAt: number; value: StorageInventory }>()
 
@@ -173,6 +179,8 @@ async function getUsage(accountId: string, token: string) {
     return await value
   } catch (cause) {
     usageCache.delete(accountId)
+    // Keep upstream diagnostics server-side and redact the token even if an error echoes it.
+    console.error('Cloudflare usage check failed', String(cause).replaceAll(token, '[redacted]'))
     throw cause
   }
 }
@@ -209,7 +217,8 @@ async function loadUsage(accountId: string, token: string): Promise<Usage> {
     const action = group.dimensions.actionType
     if (r2ClassA.has(action)) classA += group.sum.requests ?? 0
     else if (r2ClassB.has(action)) classB += group.sum.requests ?? 0
-    else if (!r2Free.has(action)) throw new Error(`Unknown R2 operation: ${action}`)
+    // New analytics operation names must not disable sync; unknown usage is excluded from totals.
+    else if (!r2Free.has(action)) console.warn('Ignoring unknown R2 operation in usage totals', action)
   }
 
   const standard = storageBytes(r2Metrics.standard)
@@ -226,11 +235,13 @@ async function loadUsage(accountId: string, token: string): Promise<Usage> {
 }
 
 async function fetchAnalytics(accountId: string, token: string, today: string, r2Start: string, now: string) {
-  const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query: `query Usage($accountTag: string!, $today: Date!, $r2Start: Time!, $now: Time!) {
+  const body = await fetchOrThrow<{ data?: { viewer: { accounts: Analytics[] } } }>(
+    'https://api.cloudflare.com/client/v4/graphql',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query Usage($accountTag: string!, $today: Date!, $r2Start: Time!, $now: Time!) {
         viewer {
           accounts(filter: { accountTag: $accountTag }) {
             d1: d1AnalyticsAdaptiveGroups(
@@ -249,23 +260,37 @@ async function fetchAnalytics(accountId: string, token: string, today: string, r
           }
         }
       }`,
-      variables: { accountTag: accountId, today, r2Start, now },
-    }),
-  })
-  const body = (await response.json()) as {
-    data?: { viewer: { accounts: Analytics[] } }
-    errors?: unknown[]
-  }
-  if (!response.ok || body.errors?.length || body.data?.viewer.accounts.length !== 1)
-    throw new Error('Cloudflare Analytics request failed')
+        variables: { accountTag: accountId, today, r2Start, now },
+      }),
+    },
+  )
+  if (body.data?.viewer.accounts.length !== 1)
+    throw new Error('Cloudflare GraphQL usage response must contain exactly one account')
   return body.data.viewer.accounts[0]
 }
 
 async function cloudflare<T>(url: string, headers: HeadersInit) {
-  const response = await fetch(url, { headers })
-  const body = (await response.json()) as { success: boolean; result: T }
-  if (!response.ok || !body.success) throw new Error('Cloudflare API request failed')
+  const body = await fetchOrThrow<{ success: boolean; result: T }>(url, { headers })
+  if (!body.success) throw new Error(`Cloudflare usage response missing success: ${url}`)
   return body.result
+}
+
+async function fetchOrThrow<T>(url: string, init: RequestInit): Promise<T> {
+  let response: Response | undefined
+  try {
+    response = await fetch(url, init)
+    const body = (await response.json()) as T & {
+      success?: boolean
+      errors?: { code?: number; message?: string }[]
+    }
+    if (!response.ok || body.success === false || body.errors?.length) {
+      // Only retain error codes/messages, not response payloads or request headers.
+      throw new Error(JSON.stringify(body.errors?.map(({ code, message }) => ({ code, message })) ?? []))
+    }
+    return body
+  } catch (cause) {
+    throw new Error(`${url} (HTTP ${response?.status ?? 'unavailable'}): ${String(cause)}`)
+  }
 }
 
 function storageBytes(metrics?: R2StorageClass) {

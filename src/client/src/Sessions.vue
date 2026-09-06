@@ -124,19 +124,41 @@ async function changeEncryptionKey() {
 async function rotateEncryptionKey() {
   if (
     !window.confirm(
-      'Rotate the encryption key and rebuild all cloud data from this device? Make sure this device has every note and attachment, and close the app on other devices. Other devices will need the new key. Local notes, IDs, and timestamps will not change.\n\nContinue?',
+      'Rotate the encryption key and rebuild all cloud data from this device? Make sure this device has every note and attachment. Other signed-in browsers will be signed out and will need the new key. Local notes, IDs, and timestamps will not change.\n\nContinue?',
     )
   )
     return
 
   try {
-    await cloudSync.rotateKey()
+    if (!(await cloudSync.rotateKey(confirmMissingAttachments))) return
     encryptionKeyVisible.value = true
     encryptionKeyCopied.value = false
-    message.value = 'Encryption key rotated. Cloud data is rebuilding.'
+    message.value = 'Encryption key rotated and cloud data rebuilt.'
   } catch (error) {
     message.value = errorMessage(error)
   }
+}
+
+async function rebuildCloud() {
+  if (
+    !window.confirm(
+      'Permanently replace all cloud notes and attachments with the local data on this device? Make sure this device has every note and attachment. Other signed-in browsers will be signed out. Cloud-only data will be lost. The encryption key, note IDs, and timestamps will not change.\n\nContinue?',
+    )
+  )
+    return
+
+  try {
+    if (!(await cloudSync.rebuildCloud(confirmMissingAttachments))) return
+    message.value = 'Cloud data rebuilt from this device.'
+  } catch (error) {
+    message.value = errorMessage(error)
+  }
+}
+
+function confirmMissingAttachments(names: string[]) {
+  return window.confirm(
+    `Some attachments are not stored on this device:\n\n${names.map((name) => `• ${name}`).join('\n')}\n\nContinuing will permanently remove them from the rebuilt cloud data. Continue?`,
+  )
 }
 
 function close() {
@@ -244,10 +266,13 @@ function errorMessage(error: unknown) {
             <button
               class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
               type="button"
-              :disabled="cloudSync.rotating || notes.syncing"
+              :disabled="cloudSync.rebuilding || notes.syncing"
               @click="rotateEncryptionKey"
             >
-              {{ cloudSync.rotating ? 'Rotating…' : 'Rotate key' }}
+              {{ cloudSync.rebuilding ? 'Rebuilding…' : 'Rotate key' }}
+            </button>
+            <button type="button" :disabled="cloudSync.rebuilding || notes.syncing" @click="rebuildCloud">
+              {{ cloudSync.rebuilding ? 'Rebuilding…' : 'Rebuild cloud from this device' }}
             </button>
           </div>
         </template>

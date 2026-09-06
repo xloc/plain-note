@@ -2,7 +2,7 @@
 
 ## Goal
 
-Keep account usage below the D1 and R2 free-tier limits.
+Provide a best-effort safeguard against exceeding the D1 and R2 free-tier limits.
 
 ## Usage data
 
@@ -38,7 +38,8 @@ Any R2 Infrequent Access data blocks writes because that storage class has no fr
 ## Failure behavior
 
 - Missing account ID or token: `500 usage_not_configured`
-- Unavailable or unknown usage data: `503 usage_unavailable`
+- Usage retrieval failures: `503 usage_unavailable`
+- Unrecognized R2 operations: warn and exclude from totals without blocking synchronization
 - Cutoff reached: `503 free_tier_limit_near`
 - No storage action after a failed check
 
@@ -50,6 +51,8 @@ Any R2 Infrequent Access data blocks writes because that storage class has no fr
 
 ## Accuracy
 
-Cloudflare analytics may be delayed or sampled. The 20% margin reduces this risk. Unknown R2 operation types fail closed.
+Cloudflare analytics may be delayed or sampled. The 20% margin reduces this risk.
+
+Unknown R2 operation types are logged but do not block synchronization, so new analytics names cannot disable the app. If an unknown operation is billable, totals may undercount usage. This guard is not a guarantee against charges.
 
 The rolling 30-day R2 count is conservative. It may block work longer than the current billing period.

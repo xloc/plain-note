@@ -201,3 +201,134 @@ test('uses account-wide Cloudflare usage', async () => {
     globalThis.fetch = originalFetch
   }
 })
+
+for (const [action, requests, limit] of [
+  ['GetObject', 1, null],
+  ['GetObject', 8_000_000, 'r2_class_b'],
+  ['PutObject', 800_000, 'r2_class_a'],
+]) {
+  test(`unknown operations preserve sync and deletion quota checks with ${requests} ${action} calls`, async (t) => {
+    const log = t.mock.method(console, 'error', () => {})
+    const warning = t.mock.method(console, 'warn', () => {})
+    t.mock.method(globalThis, 'fetch', async (input) => {
+      const url = String(input)
+      if (url.endsWith('/graphql')) {
+        return Response.json({
+          data: {
+            viewer: {
+              accounts: [
+                {
+                  d1: [],
+                  r2: [
+                    { dimensions: { actionType: 'GetBucketSippyConfiguration' }, sum: { requests: 8_000_000 } },
+                    { dimensions: { actionType: 'GetBucketNotificationConfiguration' }, sum: { requests: 8_000_000 } },
+                    { dimensions: { actionType: 'NewR2Operation' }, sum: { requests: 8_000_000 } },
+                    { dimensions: { actionType: action }, sum: { requests } },
+                  ],
+                },
+              ],
+            },
+          },
+        })
+      }
+      if (url.includes('/d1/database?')) return Response.json({ success: true, result: [] })
+      if (url.endsWith('/r2/metrics')) return Response.json({ success: true, result: {} })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const env = {
+      CLOUDFLARE_ACCOUNT_ID: `sippy-${action}-${requests}`,
+      CLOUDFLARE_USAGE_TOKEN: 'token',
+      NOTES: emptyBucket,
+      DB: statusDatabase(),
+    }
+    for (const request of [
+      new Request('https://notes.example.com/api/sync'),
+      new Request('https://notes.example.com/api/notes/1', { method: 'PUT' }),
+      new Request('https://notes.example.com/api/notes/1', { method: 'DELETE' }),
+    ]) {
+      const response = await requireFreeTierCapacity(request, env)
+      if (limit) {
+        assert.equal(response?.status, 503)
+        assert.deepEqual(await response.json(), { error: 'free_tier_limit_near', limit })
+      } else {
+        assert.equal(response, null)
+      }
+    }
+    const status = await storageStatusResponse(new Request('https://notes.example.com/api/storage'), env)
+    assert.equal(status.status, 200)
+    // Cached usage must not repeat warnings on each sync or storage request.
+    assert.deepEqual(
+      warning.mock.calls.map((call) => call.arguments),
+      [['Ignoring unknown R2 operation in usage totals', 'NewR2Operation']],
+    )
+    assert.equal(log.mock.callCount(), 0)
+  })
+}
+
+for (const scenario of [
+  { name: 'GraphQL error', endpoint: '/graphql', status: 200, message: 'Query range is too large' },
+  { name: 'REST error', endpoint: '/r2/metrics', status: 403, message: 'Permission denied', code: 10000 },
+  { name: 'non-JSON response', endpoint: '/r2/metrics', status: 502 },
+  { name: 'network failure', endpoint: '/r2/metrics', message: 'Connection failed' },
+]) {
+  for (const path of ['sync', 'storage']) {
+    test(`logs ${scenario.name} server-side for ${path} without exposing credentials`, async (t) => {
+      const token = 'private-usage-token'
+      const log = t.mock.method(console, 'error', () => {})
+      t.mock.method(globalThis, 'fetch', async (input) => {
+        const url = String(input)
+        if (scenario.endpoint && url.endsWith(scenario.endpoint)) {
+          if (!scenario.status) throw new Error(`${scenario.message}: ${token}`)
+          if (!scenario.message) return new Response('<html>Bad gateway</html>', { status: scenario.status })
+          return Response.json(
+            {
+              success: scenario.endpoint === '/graphql' ? undefined : false,
+              errors: [{ code: scenario.code, message: `${scenario.message}: ${token}`, extensions: { token } }],
+            },
+            { status: scenario.status },
+          )
+        }
+        if (url.endsWith('/graphql')) {
+          return Response.json({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    d1: [],
+                    r2: [],
+                  },
+                ],
+              },
+            },
+          })
+        }
+        if (url.includes('/d1/database?')) return Response.json({ success: true, result: [] })
+        if (url.endsWith('/r2/metrics')) return Response.json({ success: true, result: {} })
+        throw new Error(`Unexpected request: ${url}`)
+      })
+
+      const request = new Request(`https://notes.example.com/api/${path}`)
+      const env = {
+        CLOUDFLARE_ACCOUNT_ID: `diagnostic-${scenario.name}-${path}`,
+        CLOUDFLARE_USAGE_TOKEN: token,
+        NOTES: emptyBucket,
+        DB: statusDatabase(),
+      }
+      const response = await (path === 'sync'
+        ? requireFreeTierCapacity(request, env)
+        : storageStatusResponse(request, env))
+
+      assert.equal(response.status, 503)
+      assert.deepEqual(await response.json(), { error: path === 'sync' ? 'usage_unavailable' : 'storage_unavailable' })
+      assert.equal(log.mock.callCount(), 1)
+      const diagnostic = JSON.stringify(log.mock.calls[0].arguments)
+      assert.ok(diagnostic.includes(scenario.endpoint))
+      if (scenario.status) assert.ok(diagnostic.includes(`HTTP ${scenario.status}`))
+      if (scenario.message) assert.ok(diagnostic.includes(scenario.message))
+      if (scenario.code) assert.ok(diagnostic.includes(String(scenario.code)))
+      assert.ok(!diagnostic.includes(token))
+      assert.ok(!diagnostic.includes('extensions'))
+    })
+  }
+}

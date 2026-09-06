@@ -63,6 +63,14 @@ export async function requireAppSession(request: Request, env: Env): Promise<App
   return row ?? clearSessionCookies(error('session_required', 401), request)
 }
 
+export async function revokeOtherSessions(db: D1Database, currentSessionId: string) {
+  await db
+    .prepare(`UPDATE auth_sessions SET revoked_at = ?
+    WHERE id <> ? AND revoked_at IS NULL`)
+    .bind(Date.now(), currentSessionId)
+    .run()
+}
+
 export async function sessionApi(request: Request, env: Env, url: URL, session: AppSessionIdentity) {
   if (request.method === 'GET' && url.pathname === '/api/auth/status') {
     return json(await sessionStatus(env.DB, session))

@@ -16,7 +16,11 @@ const fakes = vi.hoisted(() => {
       sync: vi.fn(async () => void events.push('sync')),
       resetLocalData: vi.fn(),
       ensureNote: vi.fn(),
-      prepareCloudRebuild: vi.fn(async () => void events.push('prepare')),
+      prepareCloudRebuild: vi.fn(async () => {
+        events.push('prepare')
+        return true
+      }),
+      uploadCloudRebuild: vi.fn(async () => void events.push('upload')),
     },
     vault: {
       state: 'ready',
@@ -47,7 +51,31 @@ test('resumes a staged key rotation before trying the old key again', async () =
   fakes.events.length = 0
   setActivePinia(createPinia())
 
-  await useCloudSyncStore().rotateKey()
+  await useCloudSyncStore().rotateKey(() => true)
 
-  expect(fakes.events).toEqual(['stage', 'rebuild', 'finish', 'prepare', 'sync'])
+  expect(fakes.events).toEqual(['stage', 'prepare', 'rebuild', 'finish', 'upload'])
+})
+
+test('rebuilds the cloud from local data without a server sync', async () => {
+  fakes.events.length = 0
+  fakes.rebuildVault.mockClear()
+  setActivePinia(createPinia())
+
+  await useCloudSyncStore().rebuildCloud(() => true)
+
+  expect(fakes.events).toEqual(['prepare', 'rebuild', 'upload'])
+  expect(fakes.rebuildVault).toHaveBeenCalledWith()
+})
+
+test('does not clear the cloud when the user cancels for a missing attachment', async () => {
+  fakes.events.length = 0
+  fakes.rebuildVault.mockClear()
+  fakes.notes.uploadCloudRebuild.mockClear()
+  fakes.notes.prepareCloudRebuild.mockResolvedValueOnce(false)
+  setActivePinia(createPinia())
+
+  await expect(useCloudSyncStore().rebuildCloud(() => false)).resolves.toBe(false)
+
+  expect(fakes.rebuildVault).not.toHaveBeenCalled()
+  expect(fakes.notes.uploadCloudRebuild).not.toHaveBeenCalled()
 })

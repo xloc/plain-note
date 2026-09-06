@@ -111,3 +111,47 @@ test('restores attachment metadata when an editor deletion is undone', async () 
   expect(notes.selectedNote?.resources).toEqual([resource])
   expect(db.getResource).toHaveBeenCalledWith(note.id, resource.id)
 })
+
+test('lets the user cancel a cloud rebuild when an attachment is missing locally', async () => {
+  const resource = { id: 'resource-id', name: 'only-in-cloud.txt', mime: 'text/plain', size: 4, createdAt: 1 }
+  const note = { ...base, resources: [resource] }
+  const notes = useNotesStore()
+  notes.notes.push({ ...note, base: { ...note }, deleted: false, syncState: 'synced' })
+  vi.mocked(db.getResource).mockResolvedValue(undefined)
+  const confirmMissing = vi.fn(() => false)
+
+  await expect(notes.prepareCloudRebuild(confirmMissing)).resolves.toBe(false)
+  expect(confirmMissing).toHaveBeenCalledWith(['only-in-cloud.txt'])
+  expect(notes.notes[0]?.resources).toEqual([resource])
+  expect(db.saveNote).not.toHaveBeenCalled()
+})
+
+test('continues a cloud rebuild without attachments missing from this device', async () => {
+  const resource = { id: 'resource-id', name: 'only-in-cloud.txt', mime: 'text/plain', size: 4, createdAt: 1 }
+  const note = { ...base, resources: [resource] }
+  const notes = useNotesStore()
+  notes.notes.push({ ...note, base: { ...note }, deleted: false, syncState: 'synced' })
+  vi.mocked(db.getResource).mockResolvedValue(undefined)
+  vi.mocked(api.putNote).mockResolvedValue({ note: { ...note, resources: [] } })
+
+  await expect(notes.prepareCloudRebuild(() => true)).resolves.toBe(true)
+  await notes.uploadCloudRebuild()
+
+  expect(notes.notes[0]?.resources).toEqual([])
+  expect(db.saveNote).toHaveBeenCalledWith(expect.objectContaining({ resources: [], syncState: 'pending' }))
+  expect(api.putNote).toHaveBeenCalledWith({ baseRevision: null, note: { ...note, resources: [] } })
+  expect(api.getResource).not.toHaveBeenCalled()
+})
+
+test('uploads a cloud rebuild without pulling server records', async () => {
+  const notes = useNotesStore()
+  notes.notes.push({ ...base, base: { ...base }, deleted: false, syncState: 'synced' })
+  vi.mocked(api.putNote).mockResolvedValue({ note: base })
+
+  await notes.prepareCloudRebuild(() => true)
+  await notes.uploadCloudRebuild()
+
+  expect(api.putNote).toHaveBeenCalledWith({ baseRevision: null, note: base })
+  expect(api.getChanges).not.toHaveBeenCalled()
+  expect(notes.selectedNote?.syncState ?? notes.notes[0]?.syncState).toBe('synced')
+})

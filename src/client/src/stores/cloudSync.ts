@@ -11,9 +11,9 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   const notes = useNotesStore()
   const vault = useVaultStore()
   const online = useOnline()
-  const rotating = ref(false)
+  const rebuilding = ref(false)
   const canSync = computed(
-    () => online.value && auth.state === 'ready' && vault.state === 'ready' && notes.editable && !rotating.value,
+    () => online.value && auth.state === 'ready' && vault.state === 'ready' && notes.editable && !rebuilding.value,
   )
   let syncTimer: number | undefined
 
@@ -27,7 +27,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   }
 
   function scheduleSync() {
-    window.clearTimeout(syncTimer)
+    clearTimeout(syncTimer)
     syncTimer = window.setTimeout(() => void sync(), 700)
   }
 
@@ -41,12 +41,11 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     await notes.ensureNote()
   }
 
-  async function rotateKey() {
+  async function rotateKey(confirmMissing: (names: string[]) => boolean) {
     if (!canSync.value) throw new Error('Sign in and connect to the cloud before rotating the key')
     if (notes.syncing) throw new Error('Wait for synchronization to finish before rotating the key')
 
-    rotating.value = true
-    let rebuild = false
+    rebuilding.value = true
     try {
       if (!vault.hasPendingRotation()) {
         // Pause automatic sync so no request can use the old key after the vault replacement starts.
@@ -56,14 +55,31 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
 
       // A staged key may already be live after a lost response, so retry it before any old-key sync.
       const replacement = await vault.stageRotation()
+      if (!(await notes.prepareCloudRebuild(confirmMissing))) return false
       await api.rebuildVault(replacement.id)
       vault.finishRotation(replacement)
-      await notes.prepareCloudRebuild()
-      rebuild = true
+      await notes.uploadCloudRebuild()
+      return true
     } finally {
-      rotating.value = false
+      rebuilding.value = false
     }
-    if (rebuild) void sync()
+  }
+
+  async function rebuildCloud(confirmMissing: (names: string[]) => boolean) {
+    if (!canSync.value) throw new Error('Sign in and connect to the cloud before rebuilding it')
+    if (notes.syncing) throw new Error('Wait for synchronization to finish before rebuilding the cloud')
+
+    clearTimeout(syncTimer)
+    rebuilding.value = true
+    try {
+      // Prepare first so an incomplete device cannot clear the only cloud copy of an attachment.
+      if (!(await notes.prepareCloudRebuild(confirmMissing))) return false
+      await api.rebuildVault()
+      await notes.uploadCloudRebuild()
+      return true
+    } finally {
+      rebuilding.value = false
+    }
   }
 
   watch(() => notes.syncRequest, scheduleSync)
@@ -74,5 +90,5 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     },
   )
 
-  return { online, canSync, rotating, sync, resetLocalData, rotateKey }
+  return { online, canSync, rebuilding, sync, resetLocalData, rotateKey, rebuildCloud }
 })
