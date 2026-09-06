@@ -1,10 +1,12 @@
 import type { EncryptedNote, RemoteNoteRecord, Tombstone } from '../shared/note'
 
 const RESOURCE_GRACE_MS = 24 * 60 * 60 * 1000
+const EXPIRED_RESOURCE_KIND = 'expired-resource'
 
 export type StoredRecord = {
   record: RemoteNoteRecord
   etag: string
+  uploaded: Date
 }
 
 export function noteKey(id: string) {
@@ -24,7 +26,7 @@ export async function getRecord(bucket: R2Bucket, id: string): Promise<StoredRec
   if (kind !== 'tombstone' && kind !== 'encrypted-note') throw new Error('Unsupported note format')
   const record = JSON.parse(source) as RemoteNoteRecord
 
-  return { record, etag: object.etag }
+  return { record, etag: object.etag, uploaded: object.uploaded }
 }
 
 export async function putNote(bucket: R2Bucket, note: EncryptedNote, etag: string | null) {
@@ -44,16 +46,13 @@ export async function putTombstone(bucket: R2Bucket, tombstone: Tombstone, etag:
 }
 
 export async function getResource(bucket: R2Bucket, noteId: string, id: string) {
-  return bucket.get(resourceKey(noteId, id))
+  const object = await bucket.get(resourceKey(noteId, id))
+  return object?.customMetadata?.kind === EXPIRED_RESOURCE_KIND ? null : object
 }
 
 export async function putResource(bucket: R2Bucket, noteId: string, resourceId: string, body: ReadableStream) {
-  const key = resourceKey(noteId, resourceId)
-  const existing = await bucket.head(key)
-  if (existing) return existing
-
-  return bucket.put(key, body, {
-    onlyIf: new Headers({ 'If-None-Match': '*' }),
+  // A retry refreshes the cleanup grace period and repairs a resource removed by a racing cleanup.
+  return bucket.put(resourceKey(noteId, resourceId), body, {
     httpMetadata: { contentType: 'application/octet-stream' },
   })
 }
@@ -74,36 +73,46 @@ export async function clearNotes(bucket: R2Bucket) {
   for (let start = 0; start < keys.length; start += 1000) await bucket.delete(keys.slice(start, start + 1000))
 }
 
-export async function cleanupResources(
-  bucket: R2Bucket,
-  noteId: string,
-  referencedIds: string[],
-  removedIds: string[] = [],
-) {
-  const referenced = new Set(referencedIds)
-  const removed = new Set(removedIds)
+export async function cleanupResources(bucket: R2Bucket, noteId: string) {
   const now = Date.now()
+  const stored = await getRecord(bucket, noteId)
+  // A stable grace period prevents an older write from deleting resources restored by a newer revision.
+  if (stored && stored.uploaded.getTime() + RESOURCE_GRACE_MS > now) return
+  const referenced = new Set(stored && !('deleted' in stored.record) ? stored.record.resourceIds : [])
+  const expired: { etag: string; key: string }[] = []
   let cursor: string | undefined
   do {
     const page = await bucket.list({
       prefix: `notes/${noteId}/resources/`,
       cursor,
     })
-    const expired = page.objects
-      .filter((object) => {
-        const id = object.key.slice(`notes/${noteId}/resources/`.length)
-        const expiresAt = object.uploaded.getTime() + RESOURCE_GRACE_MS
-        return !referenced.has(id) && (removed.has(id) || expiresAt <= now)
-      })
-      .map((object) => object.key)
-    if (expired.length) await bucket.delete(expired)
+    expired.push(
+      ...page.objects
+        .filter((object) => {
+          const id = object.key.slice(`notes/${noteId}/resources/`.length)
+          const expiresAt = object.uploaded.getTime() + RESOURCE_GRACE_MS
+          return object.size > 0 && !referenced.has(id) && expiresAt <= now
+        })
+        .map((object) => ({ etag: object.etag, key: object.key })),
+    )
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
+  if (!expired.length) return
+
+  const current = await getRecord(bucket, noteId)
+  if (current?.etag !== stored?.etag) return
+  for (const resource of expired) {
+    // Conditional replacement cannot erase a resource that was re-uploaded after the cleanup scan.
+    await bucket.put(resource.key, '', {
+      onlyIf: { etagMatches: resource.etag },
+      customMetadata: { kind: EXPIRED_RESOURCE_KIND },
+    })
+  }
 }
 
 export async function cleanupExpiredResources(bucket: R2Bucket) {
   const now = Date.now()
-  const candidates = new Map<string, { id: string; key: string }[]>()
+  const noteIds = new Set<string>()
   let cursor: string | undefined
   do {
     const page = await bucket.list({
@@ -113,23 +122,12 @@ export async function cleanupExpiredResources(bucket: R2Bucket) {
     for (const object of page.objects) {
       const match = object.key.match(/^notes\/([^/]+)\/resources\/([^/]+)$/)
       const expiresAt = object.uploaded.getTime() + RESOURCE_GRACE_MS
-      if (match && expiresAt <= now) {
-        const resources = candidates.get(match[1]) ?? []
-        resources.push({ key: object.key, id: match[2] })
-        candidates.set(match[1], resources)
-      }
+      if (match && expiresAt <= now) noteIds.add(match[1])
     }
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
 
-  const expired: string[] = []
-  for (const [noteId, resources] of candidates) {
-    const stored = await getRecord(bucket, noteId)
-    const referenced = new Set(stored && !('deleted' in stored.record) ? stored.record.resourceIds : [])
-    expired.push(...resources.filter((resource) => !referenced.has(resource.id)).map((resource) => resource.key))
-  }
-
-  for (let start = 0; start < expired.length; start += 1000) await bucket.delete(expired.slice(start, start + 1000))
+  for (const noteId of noteIds) await cleanupResources(bucket, noteId)
 }
 
 function condition(etag: string | null): R2Conditional | Headers {

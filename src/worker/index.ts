@@ -13,7 +13,6 @@ import { clearCleanupFailure, recordCleanupFailure } from './issues'
 import { json } from './response'
 import {
   cleanupExpiredResources,
-  cleanupResources,
   clearNotes,
   getRecord,
   getResource,
@@ -22,7 +21,7 @@ import {
   putTombstone,
 } from './storage'
 import { requireFreeTierCapacity, storageStatusResponse, type UsageEnv } from './usage'
-import { isVaultKeyId, replaceVaultKey, requireVaultKey } from './vault'
+import { isVaultKeyId, matchesVaultKey, replaceVaultKey, requireVaultKey } from './vault'
 
 type Env = AuthEnv &
   UsageEnv & {
@@ -75,6 +74,8 @@ async function api(request: Request, env: Env, url: URL) {
   const usageError = await requireFreeTierCapacity(request, env)
   if (usageError) return usageError
 
+  if (request.method === 'POST' && url.pathname === '/api/vault/rebuild') return rebuildVault(request, env)
+
   const vaultError = await requireVaultKey(request, env.NOTES)
   if (vaultError) return vaultError
 
@@ -82,18 +83,6 @@ async function api(request: Request, env: Env, url: URL) {
     const after = Number(url.searchParams.get('after') ?? 0)
     const generation = url.searchParams.get('generation')
     return json(await getChanges(env, generation, Number.isFinite(after) ? after : 0))
-  }
-
-  if (request.method === 'POST' && url.pathname === '/api/vault/rebuild') {
-    const body = await request.json<RebuildVaultRequest>()
-    if (!isVaultKeyId(body.keyId)) return json({ error: 'invalid_vault_key' }, 400)
-
-    // Keep the old key active until the replaceable cloud copy has been cleared successfully.
-    await clearNotes(env.NOTES)
-    await rebuildIndex(env)
-    await clearCleanupFailure(env.DB)
-    await replaceVaultKey(env.NOTES, body.keyId)
-    return json({ ok: true })
   }
 
   const resourceMatch = url.pathname.match(/^\/api\/notes\/([A-Za-z0-9_-]+)\/resources\/([A-Za-z0-9_-]+)$/)
@@ -113,6 +102,27 @@ async function api(request: Request, env: Env, url: URL) {
   if (request.method === 'DELETE') return deleteNote(request, env, id)
 
   return json({ error: 'method_not_allowed' }, 405)
+}
+
+async function rebuildVault(request: Request, env: Env) {
+  const value = await request.json<unknown>()
+  if (!value || typeof value !== 'object' || !isVaultKeyId((value as Partial<RebuildVaultRequest>).keyId)) {
+    return json({ error: 'invalid_vault_key' }, 400)
+  }
+  const body = value as RebuildVaultRequest
+  const vaultError = await requireVaultKey(request, env.NOTES)
+  if (vaultError) {
+    // A lost success response must be retryable after the server has already installed the new key.
+    if (await matchesVaultKey(env.NOTES, body.keyId)) return json({ ok: true })
+    return vaultError
+  }
+
+  // Keep the old key active until the replaceable cloud copy has been cleared successfully.
+  await clearNotes(env.NOTES)
+  await rebuildIndex(env)
+  await clearCleanupFailure(env.DB)
+  await replaceVaultKey(env.NOTES, body.keyId)
+  return json({ ok: true })
 }
 
 async function readNote(env: Env, id: string) {
@@ -141,15 +151,14 @@ async function writeResource(request: Request, env: Env, noteId: string, id: str
 }
 
 async function writeNote(request: Request, env: Env, id: string) {
-  const body = await request.json<PutEncryptedNoteRequest>()
-  if (!isEncryptedNote(body.note) || body.note.id !== id || body.note.revision === body.baseRevision)
-    return json({ error: 'invalid_note' }, 400)
+  const value = await request.json<unknown>()
+  if (!isPutNoteRequest(value, id)) return json({ error: 'invalid_note' }, 400)
+  const body = value
 
   const current = await getRecord(env.NOTES, id)
-  // Idempotent retry: repeat indexing and cleanup before returning the stored result.
+  // Idempotent retries repair a derived index write that failed after the R2 commit.
   if (current?.record.revision === body.note.revision && !('deleted' in current.record)) {
     await recordChange(env, current.record, current.etag)
-    await cleanupAfterWrite(env, id, current.record.resourceIds)
     return json({ note: current.record })
   }
   if ((current?.record.revision ?? null) !== body.baseRevision) return conflict(current?.record ?? null)
@@ -158,22 +167,19 @@ async function writeNote(request: Request, env: Env, id: string) {
   if (!stored) return conflict((await getRecord(env.NOTES, id))?.record ?? null)
 
   await recordChange(env, body.note, stored.etag)
-  const previousIds = current && !('deleted' in current.record) ? current.record.resourceIds : []
-  const currentIds = body.note.resourceIds
-  const toDelete = previousIds.filter((resourceId) => !currentIds.includes(resourceId))
-  await cleanupAfterWrite(env, id, currentIds, toDelete)
   return json({ note: body.note })
 }
 
 async function deleteNote(request: Request, env: Env, id: string) {
-  const body = await request.json<DeleteNoteRequest>()
+  const value = await request.json<unknown>()
+  if (!isDeleteNoteRequest(value)) return json({ error: 'invalid_note' }, 400)
+  const body = value
   const current = await getRecord(env.NOTES, id)
   if (!current) return json({ error: 'not_found' }, 404)
 
-  // Idempotent retry: repeat indexing and cleanup before returning the stored tombstone.
+  // Idempotent retries repair a derived index write that failed after the R2 commit.
   if ('deleted' in current.record && current.record.revision === body.revision) {
     await recordChange(env, current.record, current.etag)
-    await cleanupAfterWrite(env, id, [])
     return json({ tombstone: current.record })
   }
   if (current.record.revision !== body.baseRevision) return conflict(current.record)
@@ -189,8 +195,6 @@ async function deleteNote(request: Request, env: Env, id: string) {
   if (!stored) return conflict((await getRecord(env.NOTES, id))?.record ?? null)
 
   await recordChange(env, tombstone, stored.etag)
-  const previousIds = 'deleted' in current.record ? [] : current.record.resourceIds
-  await cleanupAfterWrite(env, id, [], previousIds)
   return json({ tombstone })
 }
 
@@ -199,15 +203,42 @@ function conflict(current: RemoteNoteRecord | null) {
   return json({ error: 'conflict', current } satisfies RemoteConflictResponse, 409)
 }
 
-async function cleanupAfterWrite(env: Env, noteId: string, referencedIds: string[], removedIds: string[] = []) {
-  try {
-    await cleanupResources(env.NOTES, noteId, referencedIds, removedIds)
-  } catch (error) {
-    console.error('Resource cleanup failed', { noteId, error })
-    await recordCleanupFailure(env.DB)
-  }
+function isPutNoteRequest(value: unknown, id: string): value is PutEncryptedNoteRequest {
+  if (!value || typeof value !== 'object') return false
+  const body = value as Partial<PutEncryptedNoteRequest>
+  const baseRevision = body.baseRevision
+  return (
+    (baseRevision === null || typeof baseRevision === 'string') &&
+    isEncryptedNote(body.note) &&
+    body.note.id === id &&
+    body.note.revision !== baseRevision
+  )
+}
+
+function isDeleteNoteRequest(value: unknown): value is DeleteNoteRequest {
+  if (!value || typeof value !== 'object') return false
+  const body = value as Partial<DeleteNoteRequest>
+  return (
+    typeof body.baseRevision === 'string' &&
+    typeof body.revision === 'string' &&
+    body.revision !== body.baseRevision &&
+    isTimestamp(body.updatedAt)
+  )
 }
 
 function isEncryptedNote(note: EncryptedNote | undefined): note is EncryptedNote {
-  return Boolean(note && Array.isArray(note.resourceIds) && typeof note.encrypted === 'string')
+  // These clear fields drive synchronization and cleanup, so validate them at the API boundary.
+  return Boolean(
+    note &&
+    typeof note.id === 'string' &&
+    typeof note.revision === 'string' &&
+    isTimestamp(note.updatedAt) &&
+    Array.isArray(note.resourceIds) &&
+    note.resourceIds.every((id) => typeof id === 'string') &&
+    typeof note.encrypted === 'string',
+  )
+}
+
+function isTimestamp(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }

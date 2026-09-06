@@ -20,7 +20,6 @@ const dialog = useTemplateRef<HTMLDialogElement>('dialog')
 const message = ref('')
 const encryptionKeyVisible = ref(false)
 const encryptionKeyCopied = ref(false)
-const rotatingKey = ref(false)
 
 watch(
   () => route.query.sessions === '1',
@@ -130,7 +129,6 @@ async function rotateEncryptionKey() {
   )
     return
 
-  rotatingKey.value = true
   try {
     await cloudSync.rotateKey()
     encryptionKeyVisible.value = true
@@ -138,8 +136,6 @@ async function rotateEncryptionKey() {
     message.value = 'Encryption key rotated. Cloud data is rebuilding.'
   } catch (error) {
     message.value = errorMessage(error)
-  } finally {
-    rotatingKey.value = false
   }
 }
 
@@ -198,7 +194,7 @@ function errorMessage(error: unknown) {
           v-else-if="cloud.online.value && auth.state === 'ready'"
           class="mt-3 cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
           type="button"
-          :disabled="notes.syncing"
+          :disabled="notes.syncing || !cloudSync.canSync"
           @click="cloudSync.sync"
         >
           Sync now
@@ -248,10 +244,10 @@ function errorMessage(error: unknown) {
             <button
               class="cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
               type="button"
-              :disabled="rotatingKey || notes.syncing"
+              :disabled="cloudSync.rotating || notes.syncing"
               @click="rotateEncryptionKey"
             >
-              {{ rotatingKey ? 'Rotating…' : 'Rotate key' }}
+              {{ cloudSync.rotating ? 'Rotating…' : 'Rotate key' }}
             </button>
           </div>
         </template>

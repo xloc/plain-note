@@ -32,6 +32,7 @@ function deleteNote(id: string) {
 
 const { isOverDropZone } = useDropZone(noteList, {
   async onDrop(files) {
+    if (!notes.editable) return
     const file = files?.find(
       (candidate) => candidate.type === 'text/markdown' || /\.(md|markdown)$/i.test(candidate.name),
     )
@@ -90,6 +91,7 @@ watch(
           class="m-2 rounded-lg bg-stone-200 p-2 text-stone-800 hover:bg-stone-100"
           type="button"
           title="New note"
+          :disabled="!notes.editable"
           @click="emit('create')"
         >
           <PencilSquareIcon class="size-5" />

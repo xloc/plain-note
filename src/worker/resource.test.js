@@ -53,7 +53,7 @@ class Bucket {
     return {
       objects: [...this.objects.entries()]
         .filter(([key]) => key.startsWith(prefix))
-        .map(([key, object]) => ({ key, size: object.blob?.size ?? 0, uploaded: object.uploaded })),
+        .map(([key, object]) => ({ key, etag: object.etag, size: object.blob?.size ?? 0, uploaded: object.uploaded })),
       truncated: false,
     }
   }
@@ -107,7 +107,7 @@ class DB {
   }
 }
 
-test('uploads and downloads opaque immutable resource ciphertext by UUID', async () => {
+test('uploads, repairs, and downloads opaque resource ciphertext by UUID', async () => {
   const bucket = new Bucket()
   const env = { NOTES: bucket, TEST_AUTH_BYPASS: true }
   const url = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
@@ -143,13 +143,17 @@ test('uploads and downloads opaque immutable resource ciphertext by UUID', async
     env,
   )
   expect(retry.status).toBe(200)
-  expect(await (await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).text()).toBe('resource bytes')
+  expect(await (await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).text()).toBe(
+    'different retry ciphertext',
+  )
 
-  await cleanupResources(bucket, 'note-id', [])
+  await cleanupResources(bucket, 'note-id')
   expect((await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).status).toBe(200)
 
-  await cleanupResources(bucket, 'note-id', [], ['resource-id'])
+  bucket.objects.get('notes/note-id/resources/resource-id').uploaded = new Date(0)
+  await cleanupResources(bucket, 'note-id')
   expect((await worker.fetch(new Request(url, { headers: vaultHeaders }), env)).status).toBe(404)
+  expect(bucket.objects.get('notes/note-id/resources/resource-id').blob.size).toBe(0)
   expect((await worker.fetch(new Request(url, { method: 'DELETE', headers: vaultHeaders }), env)).status).toBe(405)
 })
 
@@ -163,6 +167,31 @@ test('rejects a different vault key before returning ciphertext', async () => {
 
   expect(response.status).toBe(403)
   expect(await response.json()).toEqual({ error: 'vault_key_mismatch' })
+})
+
+test('rejects an invalid clear update timestamp', async () => {
+  const bucket = new Bucket()
+  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const response = await worker.fetch(
+    new Request('http://localhost:8787/api/notes/note-id', {
+      method: 'PUT',
+      headers: vaultHeaders,
+      body: JSON.stringify({
+        baseRevision: null,
+        note: {
+          id: 'note-id',
+          updatedAt: -1,
+          revision: 'revision-1',
+          resourceIds: [],
+          encrypted: 'opaque-note-ciphertext',
+        },
+      }),
+    }),
+    env,
+  )
+
+  expect(response.status).toBe(400)
+  expect(bucket.objects.has('notes/note-id/note.md')).toBe(false)
 })
 
 test('rebuilds the cloud vault with a new key identifier', async () => {
@@ -195,6 +224,16 @@ test('rebuilds the cloud vault with a new key identifier', async () => {
   expect(response.status).toBe(200)
   expect(await response.json()).toEqual({ ok: true })
   expect([...bucket.objects.keys()]).toEqual(['vault/key.json'])
+  const retry = await worker.fetch(
+    new Request('http://localhost:8787/api/vault/rebuild', {
+      method: 'POST',
+      headers: { ...vaultHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyId: newKeyId }),
+    }),
+    env,
+  )
+  expect(retry.status).toBe(200)
+  expect(await retry.json()).toEqual({ ok: true })
   expect(
     (
       await worker.fetch(
@@ -225,12 +264,12 @@ test('cleans up expired unreferenced uploads', async () => {
     uploaded: new Date(0),
   })
 
-  await cleanupResources(bucket, 'note-id', [])
+  await cleanupResources(bucket, 'note-id')
 
-  expect(bucket.objects.has('notes/note-id/resources/expired-id')).toBe(false)
+  expect(bucket.objects.get('notes/note-id/resources/expired-id').blob.size).toBe(0)
 })
 
-test('records a cleanup failure without failing the committed note', async () => {
+test('does not run destructive resource cleanup inline with a note commit', async () => {
   const bucket = new Bucket()
   const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
   const note = {
@@ -258,19 +297,10 @@ test('records a cleanup failure without failing the committed note', async () =>
     )
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ note })
-    expect(log).toHaveBeenCalledWith('Resource cleanup failed', {
-      noteId: 'note-id',
-      error: expect.any(Error),
-    })
+    expect(log).not.toHaveBeenCalled()
 
     const status = await worker.fetch(new Request('http://localhost:8787/api/storage'), env)
-    expect((await status.json()).issues).toEqual([
-      {
-        code: 'resource_cleanup_failed',
-        lastOccurredAt: expect.any(Number),
-        occurrences: 1,
-      },
-    ])
+    expect((await status.json()).issues).toEqual([])
   } finally {
     log.mockRestore()
   }
@@ -291,6 +321,7 @@ test('scheduled cleanup uses opaque IDs and preserves referenced resources regar
     },
     null,
   )
+  bucket.objects.get('notes/note-id/note.md').uploaded = new Date(0)
   bucket.objects.set('notes/note-id/resources/referenced-id', {
     blob: new Blob(['kept']),
     uploaded: new Date(0),
@@ -307,7 +338,7 @@ test('scheduled cleanup uses opaque IDs and preserves referenced resources regar
   await worker.scheduled({}, { DB: db, NOTES: bucket }, {})
 
   expect(bucket.objects.has('notes/note-id/resources/referenced-id')).toBe(true)
-  expect(bucket.objects.has('notes/note-id/resources/orphan-id')).toBe(false)
+  expect(bucket.objects.get('notes/note-id/resources/orphan-id').blob.size).toBe(0)
   expect(bucket.objects.has('notes/note-id/resources/fresh-id')).toBe(true)
   expect(db.cleanupFailures).toBe(0)
 })
@@ -329,7 +360,7 @@ test('records and surfaces a scheduled cleanup failure', async () => {
   }
 })
 
-test('derives immediate resource removal from a note metadata update', async () => {
+test('defers resource removal until ownership has remained unchanged for the grace period', async () => {
   const bucket = new Bucket()
   const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
   const resourceUrl = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
@@ -381,5 +412,28 @@ test('derives immediate resource removal from a note metadata update', async () 
     env,
   )
   expect(updated.status).toBe(200)
+  expect((await worker.fetch(new Request(resourceUrl, { headers: vaultHeaders }), env)).status).toBe(200)
+
+  bucket.objects.get('notes/note-id/note.md').uploaded = new Date(0)
+  bucket.objects.get('notes/note-id/resources/resource-id').uploaded = new Date(0)
+  await cleanupResources(bucket, 'note-id')
   expect((await worker.fetch(new Request(resourceUrl, { headers: vaultHeaders }), env)).status).toBe(404)
+})
+
+test('does not erase a resource re-uploaded during cleanup', async () => {
+  const bucket = new Bucket()
+  await bucket.put('notes/note-id/resources/resource-id', 'old ciphertext')
+  const resource = bucket.objects.get('notes/note-id/resources/resource-id')
+  resource.uploaded = new Date(0)
+  const put = bucket.put.bind(bucket)
+  bucket.put = async (key, body, options) => {
+    if (key.endsWith('/resources/resource-id') && options?.onlyIf?.etagMatches) {
+      await put(key, 'new ciphertext')
+    }
+    return put(key, body, options)
+  }
+
+  await cleanupResources(bucket, 'note-id')
+
+  expect(await bucket.objects.get('notes/note-id/resources/resource-id').blob.text()).toBe('new ciphertext')
 })

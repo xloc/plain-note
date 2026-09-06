@@ -143,7 +143,9 @@ async function getStorageInventory(bucket: R2Bucket) {
   do {
     const page = await bucket.list(cursor ? { cursor } : {})
     usedBytes += page.objects.reduce((total, object) => total + object.size, 0)
-    storedResources += page.objects.filter((object) => /^notes\/[^/]+\/resources\/[^/]+$/.test(object.key)).length
+    storedResources += page.objects.filter(
+      (object) => object.size > 0 && /^notes\/[^/]+\/resources\/[^/]+$/.test(object.key),
+    ).length
     cursor = page.truncated ? page.cursor : undefined
   } while (cursor)
 

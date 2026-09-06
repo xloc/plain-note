@@ -1,8 +1,7 @@
 import { useOnline } from '@vueuse/core'
 import { defineStore } from 'pinia'
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import * as api from '../api'
-import { recoveryKey } from '../encryption'
 import { useAuthStore } from './auth'
 import { useNotesStore } from './notes'
 import { useVaultStore } from './vault'
@@ -12,7 +11,10 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   const notes = useNotesStore()
   const vault = useVaultStore()
   const online = useOnline()
-  const canSync = computed(() => online.value && auth.state === 'ready' && vault.state === 'ready')
+  const rotating = ref(false)
+  const canSync = computed(
+    () => online.value && auth.state === 'ready' && vault.state === 'ready' && notes.editable && !rotating.value,
+  )
   let syncTimer: number | undefined
 
   async function sync() {
@@ -30,7 +32,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   }
 
   async function resetLocalData() {
-    if (notes.syncing) return
+    if (!notes.editable || notes.syncing) return
     window.clearTimeout(syncTimer)
 
     auth.signOutBestEffort()
@@ -43,16 +45,25 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     if (!canSync.value) throw new Error('Sign in and connect to the cloud before rotating the key')
     if (notes.syncing) throw new Error('Wait for synchronization to finish before rotating the key')
 
-    // A successful sync proves that this device has the complete vault before the cloud copy is replaced.
-    await notes.sync()
-    if (notes.hasPending) throw new Error('Finish synchronizing local changes before rotating the key')
+    rotating.value = true
+    let rebuild = false
+    try {
+      if (!vault.hasPendingRotation()) {
+        // Pause automatic sync so no request can use the old key after the vault replacement starts.
+        await notes.sync()
+        if (notes.hasPending) throw new Error('Finish synchronizing local changes before rotating the key')
+      }
 
-    const secret = recoveryKey.create()
-    const replacement = await recoveryKey.import(secret)
-    await api.rebuildVault(replacement.id)
-    await vault.importSecret(secret)
-    await notes.prepareCloudRebuild()
-    void sync()
+      // A staged key may already be live after a lost response, so retry it before any old-key sync.
+      const replacement = await vault.stageRotation()
+      await api.rebuildVault(replacement.id)
+      vault.finishRotation(replacement)
+      await notes.prepareCloudRebuild()
+      rebuild = true
+    } finally {
+      rotating.value = false
+    }
+    if (rebuild) void sync()
   }
 
   watch(() => notes.syncRequest, scheduleSync)
@@ -63,5 +74,5 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     },
   )
 
-  return { online, canSync, sync, resetLocalData, rotateKey }
+  return { online, canSync, rotating, sync, resetLocalData, rotateKey }
 })

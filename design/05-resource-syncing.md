@@ -64,9 +64,7 @@ Concurrent resource edits use a three-way set merge keyed by UUID. Independent a
 
 ### Cleanup
 
-Removing a resource changes only the note metadata. After committing the note, the Worker removes resources explicitly absent from the new revision.
-
-Other unreferenced uploads receive a 24-hour grace period. This protects a new upload from a concurrent note update occurring before its own note commit. Later note writes clean up opportunistically, and a daily sweep removes expired uploads that receive no later write.
+Removing a resource changes only the note metadata. Unreferenced resources receive a 24-hour grace period after both the resource upload and the latest note revision. A daily sweep conditionally replaces expired ciphertext with a zero-byte marker only if the scanned object has not changed. This prevents stale cleanup from erasing a newer upload while reclaiming its stored bytes.
 
 Deleting a note applies the same cleanup with an empty resource list.
 

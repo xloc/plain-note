@@ -3,6 +3,7 @@ import { computed, ref, shallowRef } from 'vue'
 import { recoveryKey, type VaultKey } from '../encryption'
 
 const STORAGE_KEY = 'plain-note:vault-key'
+const PENDING_STORAGE_KEY = 'plain-note:pending-vault-key'
 
 type State = 'loading' | 'missing' | 'ready'
 
@@ -35,6 +36,23 @@ export const useVaultStore = defineStore('vault', () => {
     await useSecret(secret)
   }
 
+  async function stageRotation() {
+    const replacement = await recoveryKey.import(localStorage.getItem(PENDING_STORAGE_KEY) ?? recoveryKey.create())
+    // Persist the only copy before the server can discard data encrypted with the current key.
+    localStorage.setItem(PENDING_STORAGE_KEY, replacement.secret)
+    return replacement
+  }
+
+  function hasPendingRotation() {
+    return localStorage.getItem(PENDING_STORAGE_KEY) !== null
+  }
+
+  function finishRotation(replacement: { secret: string; key: VaultKey; id: string }) {
+    localStorage.setItem(STORAGE_KEY, replacement.secret)
+    cached.value = replacement
+    localStorage.removeItem(PENDING_STORAGE_KEY)
+  }
+
   async function useSecret(value: string) {
     try {
       const imported = await recoveryKey.import(value)
@@ -62,7 +80,19 @@ export const useVaultStore = defineStore('vault', () => {
     window.setTimeout(() => URL.revokeObjectURL(url))
   }
 
-  return { state, message, secret, initialize, create, importSecret, copy, download }
+  return {
+    state,
+    message,
+    secret,
+    initialize,
+    create,
+    importSecret,
+    hasPendingRotation,
+    stageRotation,
+    finishRotation,
+    copy,
+    download,
+  }
 })
 
 export function currentVault() {

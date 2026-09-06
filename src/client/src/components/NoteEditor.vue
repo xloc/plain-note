@@ -300,6 +300,7 @@ function pastedImageFiles(html: string) {
 }
 
 function handlePaste(editorView: EditorView, event: ClipboardEvent) {
+  if (!props.editable) return false
   const files = transferredFiles(event.clipboardData)
   const insertion = fileInsertionPoint(editorView.state.selection)
   if (files.length) {

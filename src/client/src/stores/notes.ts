@@ -5,8 +5,10 @@ import { computed, ref, toRaw } from 'vue'
 import type { Change, Note, NoteRecord, NoteResource, Tombstone } from '../../../shared/note'
 import * as api from '../api'
 import * as db from '../db'
+import { claimEditLock } from '../editLock'
 import { referencedResourceIds } from '../editor/markdown'
 import { mergeResources } from './mergeResources'
+import { mergeTags } from './mergeTags'
 import { mergeMarkdown } from './mergeMarkdown'
 import { copyNote, copyRecord, fromRemote, toNote } from './noteRecords'
 
@@ -16,10 +18,13 @@ export const useNotesStore = defineStore('notes', () => {
   const notes = ref<db.LocalNote[]>([])
   const selectedId = useStorage<string | null>('plain-note:selected-note-id', null)
   const ready = ref(false)
+  const editable = ref(true)
   const syncing = ref(false)
   const syncMessage = ref('Local only')
   const syncRequest = ref(0)
   const resourceProgress = ref<Record<string, number>>({})
+  // Keep removed resource metadata and blobs available while editor undo can restore their references.
+  const detachedResources = new Map<string, Map<string, NoteResource>>()
 
   const activeNotes = computed(() =>
     notes.value.filter((note) => !note.deleted).sort((a, b) => b.updatedAt - a.updatedAt),
@@ -36,18 +41,33 @@ export const useNotesStore = defineStore('notes', () => {
     })
   }
 
-  function keepReferencedResources(note: db.LocalNote, content = note.content) {
+  function keepReferencedResources(note: db.LocalNote, content = note.content, restored?: NoteResource[]) {
     const referenced = referencedResourceIds(content)
     const resources = note.resources.filter((resource) => referenced.has(resource.id))
-    if (resources.length === note.resources.length) return false
     for (const resource of note.resources) {
-      if (!referenced.has(resource.id)) delete resourceProgress.value[resource.id]
+      if (referenced.has(resource.id)) continue
+      if (restored) {
+        const detached = detachedResources.get(note.id) ?? new Map<string, NoteResource>()
+        detached.set(resource.id, resource)
+        detachedResources.set(note.id, detached)
+      }
+      delete resourceProgress.value[resource.id]
     }
+    const detached = restored ? detachedResources.get(note.id) : undefined
+    for (const [id, resource] of detached ?? []) {
+      if (!referenced.has(id)) continue
+      resources.push(resource)
+      restored?.push(resource)
+      detached!.delete(id)
+    }
+    if (detached?.size === 0) detachedResources.delete(note.id)
+    if (resources.length === note.resources.length && !restored?.length) return false
     note.resources = resources
     return true
   }
 
   async function addNote(source: NewNote) {
+    if (!editable.value) return
     const referenced = referencedResourceIds(source.content)
     const note: db.LocalNote = {
       ...source,
@@ -69,6 +89,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function removeLocalNote(id: string) {
     notes.value = notes.value.filter((note) => note.id !== id)
+    detachedResources.delete(id)
     await Promise.all([db.removeNote(id), db.removeNoteResources(id)])
   }
 
@@ -76,7 +97,7 @@ export const useNotesStore = defineStore('notes', () => {
     if (!note.deleted && keepReferencedResources(note)) {
       Object.assign(note, {
         revision: randomUUID(),
-        updatedAt: Date.now(),
+        updatedAt: nextUpdatedAt(note),
         syncState: 'pending',
       })
     }
@@ -95,16 +116,13 @@ export const useNotesStore = defineStore('notes', () => {
       return
     }
 
-    notes.value = await db.loadNotes()
-    for (const note of notes.value) {
-      if (note.deleted || !keepReferencedResources(note)) continue
-      Object.assign(note, {
-        revision: randomUUID(),
-        updatedAt: Date.now(),
-        syncState: 'pending',
-      })
-      await saveNote(note)
-    }
+    editable.value = false
+    await claimEditLock(async () => {
+      // A waiting tab reloads the winner's committed state before it is allowed to edit.
+      if (ready.value) await loadLocalNotes(true)
+      editable.value = true
+    })
+    await loadLocalNotes(editable.value)
     if (preferredId) {
       selectedId.value = preferredId
     } else if (!selectedNote.value) {
@@ -135,20 +153,24 @@ export const useNotesStore = defineStore('notes', () => {
     await addNote(imported)
   }
 
-  function updateSelected(update: { content: string }) {
+  async function updateSelected(update: { content: string }) {
+    if (!editable.value) return
     const note = selectedNote.value
     if (!note) return
-    keepReferencedResources(note, update.content)
+    const restored: NoteResource[] = []
+    keepReferencedResources(note, update.content, restored)
     Object.assign(note, update, {
       revision: randomUUID(),
-      updatedAt: Date.now(),
+      updatedAt: nextUpdatedAt(note),
       syncState: 'pending',
     })
-    void saveNote(note)
+    if (restored.length) await markResourcesPending(note.id, restored)
+    await saveNote(note)
     notifyLocalChange()
   }
 
   async function addResources(noteId: string, files: File[]) {
+    if (!editable.value) return
     const note = notes.value.find((candidate) => candidate.id === noteId && !candidate.deleted)
     if (!note) return
 
@@ -173,7 +195,7 @@ export const useNotesStore = defineStore('notes', () => {
     note.resources.push(...additions)
     Object.assign(note, {
       revision: randomUUID(),
-      updatedAt: Date.now(),
+      updatedAt: nextUpdatedAt(note),
       syncState: 'pending',
     })
     await saveNote(note)
@@ -182,12 +204,16 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function removeResource(noteId: string, id: string) {
+    if (!editable.value) return
     const note = notes.value.find((candidate) => candidate.id === noteId && !candidate.deleted)
-    if (!note?.resources.some((resource) => resource.id === id)) return
+    const detached = detachedResources.get(noteId)
+    if (!note || (!note.resources.some((resource) => resource.id === id) && !detached?.has(id))) return
     note.resources = note.resources.filter((resource) => resource.id !== id)
+    detached?.delete(id)
+    if (detached?.size === 0) detachedResources.delete(noteId)
     Object.assign(note, {
       revision: randomUUID(),
-      updatedAt: Date.now(),
+      updatedAt: nextUpdatedAt(note),
       syncState: 'pending',
     })
     delete resourceProgress.value[id]
@@ -218,6 +244,7 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function deleteNote(id: string) {
+    if (!editable.value) return
     const note = notes.value.find((candidate) => candidate.id === id && !candidate.deleted)
     if (!note || note.deleted) return
     if (note.base === null) {
@@ -226,7 +253,7 @@ export const useNotesStore = defineStore('notes', () => {
       Object.assign(note, {
         deleted: true,
         revision: randomUUID(),
-        updatedAt: Date.now(),
+        updatedAt: nextUpdatedAt(note),
         syncState: 'pending',
       })
       await saveNote(note)
@@ -252,6 +279,7 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function resetLocalData() {
+    if (!editable.value) return
     await db.clearLocalData()
     notes.value = []
     selectedId.value = null
@@ -275,7 +303,7 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function sync() {
-    if (syncing.value) return
+    if (!editable.value || syncing.value) return
     syncing.value = true
     syncMessage.value = 'Syncing'
     try {
@@ -382,6 +410,7 @@ export const useNotesStore = defineStore('notes', () => {
       const desired = new Set(note.resources.map((resource) => resource.id))
       for (const local of await db.loadResources(note.id)) {
         if (!desired.has(local.id)) {
+          if (detachedResources.get(note.id)?.has(local.id)) continue
           await db.removeResource(note.id, local.id)
         } else if (note.syncState === 'synced' && local.syncState === 'pending') {
           local.syncState = 'synced'
@@ -468,7 +497,14 @@ export const useNotesStore = defineStore('notes', () => {
       return
     }
 
+    const revision = local?.revision
     const remote = (await api.getNote(change.id)).note
+    const current = notes.value.find((note) => note.id === change.id)
+    // State may change during the fetch; never replace a newer local revision with its stale result.
+    if (current?.revision !== revision) {
+      if (current?.syncState === 'pending') await mergeConflict(current, remote)
+      return
+    }
     await replaceLocalNote(fromRemote(remote))
   }
 
@@ -486,7 +522,7 @@ export const useNotesStore = defineStore('notes', () => {
       local.base = copyRecord(remote)
       await markResourcesPending(local.id, local.resources)
       local.revision = randomUUID()
-      local.updatedAt = Date.now()
+      local.updatedAt = nextUpdatedAt(local, remote)
       local.syncState = 'pending'
       await saveNote(local)
       return
@@ -498,6 +534,7 @@ export const useNotesStore = defineStore('notes', () => {
     }
 
     local.content = mergeMarkdown('deleted' in local.base ? '' : local.base.content, remote.content, local.content)
+    local.tags = mergeTags('deleted' in local.base ? [] : local.base.tags, remote.tags, local.tags)
     local.resources = mergeResources(
       'deleted' in local.base ? [] : local.base.resources,
       remote.resources,
@@ -506,7 +543,7 @@ export const useNotesStore = defineStore('notes', () => {
     keepReferencedResources(local, local.content)
     local.base = copyNote(remote)
     local.revision = randomUUID()
-    local.updatedAt = Date.now()
+    local.updatedAt = nextUpdatedAt(local, remote)
     local.syncState = 'pending'
     await saveNote(local)
   }
@@ -530,10 +567,32 @@ export const useNotesStore = defineStore('notes', () => {
     }
   }
 
+  function nextUpdatedAt(note: Pick<db.LocalNote, 'updatedAt'>, remote?: NoteRecord) {
+    // Wall clocks can move backwards, but a later revision must not have an earlier update time.
+    return Math.max(Date.now(), note.updatedAt + 1, remote ? remote.updatedAt + 1 : 0)
+  }
+
+  async function loadLocalNotes(normalize: boolean) {
+    notes.value = await db.loadNotes()
+    if (normalize) {
+      for (const note of notes.value) {
+        if (note.deleted || !keepReferencedResources(note)) continue
+        Object.assign(note, {
+          revision: randomUUID(),
+          updatedAt: nextUpdatedAt(note),
+          syncState: 'pending',
+        })
+        await saveNote(note)
+      }
+    }
+    if (!selectedNote.value) selectFirstNote()
+  }
+
   return {
     notes,
     selectedId,
     ready,
+    editable,
     syncing,
     syncMessage,
     syncRequest,

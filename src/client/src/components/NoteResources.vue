@@ -94,6 +94,7 @@ function download(resource: NoteResource) {
               class="cursor-pointer rounded-lg p-2 text-red-600 hover:bg-red-50"
               type="button"
               title="Remove"
+              :disabled="!notes.editable"
               @click="emit('remove', resource.id)"
             >
               <IconTrash class="size-5" />

@@ -26,11 +26,11 @@ export async function loadNotes() {
 }
 
 export async function saveNote(note: LocalNote) {
-  await request((await database).transaction('notes', 'readwrite').objectStore('notes').put(note))
+  await write('notes', (store) => store.put(note))
 }
 
 export async function removeNote(id: string) {
-  await request((await database).transaction('notes', 'readwrite').objectStore('notes').delete(id))
+  await write('notes', (store) => store.delete(id))
 }
 
 export async function getResource(noteId: string, id: string) {
@@ -46,19 +46,20 @@ export async function loadResources(noteId: string) {
 }
 
 export async function saveResource(resource: LocalResource) {
-  await request((await database).transaction('resources', 'readwrite').objectStore('resources').put(resource))
+  await write('resources', (store) => store.put(resource))
 }
 
 export async function removeResource(noteId: string, id: string) {
-  await request((await database).transaction('resources', 'readwrite').objectStore('resources').delete([noteId, id]))
+  await write('resources', (store) => store.delete([noteId, id]))
 }
 
 export async function removeNoteResources(noteId: string) {
   const transaction = (await database).transaction('resources', 'readwrite')
+  const completion = complete(transaction)
   const store = transaction.objectStore('resources')
   const keys = await request<IDBValidKey[]>(store.index('noteId').getAllKeys(noteId))
   for (const key of keys) store.delete(key)
-  await complete(transaction)
+  await completion
 }
 
 export async function clearLocalData() {
@@ -77,7 +78,14 @@ export async function getMeta(key: string) {
 }
 
 export async function setMeta(key: string, value: string | number) {
-  await request((await database).transaction('meta', 'readwrite').objectStore('meta').put({ key, value }))
+  await write('meta', (store) => store.put({ key, value }))
+}
+
+async function write(storeName: 'notes' | 'resources' | 'meta', change: (store: IDBObjectStore) => IDBRequest) {
+  const transaction = (await database).transaction(storeName, 'readwrite')
+  const completion = complete(transaction)
+  // A successful request is only staged; callers may advance sync state after the transaction commits.
+  await Promise.all([request(change(transaction.objectStore(storeName))), completion])
 }
 
 function openDatabase() {

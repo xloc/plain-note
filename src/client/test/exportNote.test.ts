@@ -20,3 +20,11 @@ test('imports Markdown metadata without preserving the note UUID or resource ref
     updatedAt: 200,
   })
 })
+
+test('replaces invalid imported timestamps', () => {
+  const before = Date.now()
+  const imported = parseMarkdownImport('---\ncreatedAt: -1\nupdatedAt: 1.5\n---\n\nImported')
+
+  expect(imported.createdAt).toBeGreaterThanOrEqual(before)
+  expect(imported.updatedAt).toBeGreaterThanOrEqual(before)
+})

@@ -116,12 +116,14 @@ export function parseMarkdownImport(source: string): MarkdownImport {
 
     const createdAt = Number(metadata.createdAt)
     const updatedAt = Number(metadata.updatedAt)
+    // Date.now produces non-negative integers; reject metadata that would break note ordering.
+    const timestamp = (value: number) => (Number.isSafeInteger(value) && value >= 0 ? value : now)
     return {
       content: source.slice(frontMatter[0].length).replace(/^\r?\n/, ''),
       tags,
       resources: [],
-      createdAt: Number.isFinite(createdAt) ? createdAt : now,
-      updatedAt: Number.isFinite(updatedAt) ? updatedAt : now,
+      createdAt: timestamp(createdAt),
+      updatedAt: timestamp(updatedAt),
     }
   } catch {
     return plain

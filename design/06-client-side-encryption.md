@@ -77,10 +77,10 @@ The client encrypts a complete plaintext note immediately before upload and decr
 
 The client uploads encrypted resource bytes before committing the note that references them. After accepting a note update, the Worker compares the previous and current clear resource UUID lists.
 
-- A UUID removed by the accepted note update is deleted immediately.
+- A UUID removed by the accepted note update is replaced with a zero-byte marker after the cleanup grace period.
 - A UUID in the current list is retained regardless of object age.
 - An unreferenced upload is protected for 24 hours after its R2 upload time.
-- The daily sweep removes an expired object only when the current note does not reference it.
+- The daily sweep conditionally replaces an expired object only when the current note does not reference it.
 - Deleting a note treats its resource list as empty.
 
 The grace period protects the interval between uploading resource bytes and committing their note. Note edits do not refresh resource objects and do not need to: a current reference always takes precedence over age.

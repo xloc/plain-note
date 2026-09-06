@@ -27,6 +27,11 @@ export function isVaultKeyId(value: unknown): value is string {
   return typeof value === 'string' && KEY_ID_PATTERN.test(value)
 }
 
+export async function matchesVaultKey(bucket: R2Bucket, keyId: string) {
+  const stored = await bucket.get(VAULT_KEY)
+  return Boolean(stored && (await stored.text()) === keyId)
+}
+
 export async function replaceVaultKey(bucket: R2Bucket, keyId: string) {
   await bucket.put(VAULT_KEY, keyId, {
     httpMetadata: { contentType: 'text/plain; charset=utf-8' },

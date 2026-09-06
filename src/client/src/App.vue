@@ -43,6 +43,7 @@ let swipeFromEdge = false
 const openSyncStatus = () => void router.push({ query: { ...route.query, sessions: '1' } })
 const openStorageStatus = () => void router.push({ query: { ...route.query, storage: '1' } })
 const createNote = () => {
+  if (!notes.editable) return
   showNoteList.value = false
   previewMode.value = false
   void notes.createNote()
@@ -115,13 +116,19 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
     label: htmlExportPreview.value ? 'Hide HTML preview' : 'Preview exported HTML',
     action: toggleHtmlExportPreview,
   },
-  { icon: IconTrash, label: 'Delete note', action: () => void notes.deleteSelected(), destructive: true },
+  {
+    icon: IconTrash,
+    label: 'Delete note',
+    action: () => void notes.deleteSelected(),
+    disabled: !notes.editable,
+    destructive: true,
+  },
   { icon: IconDatabase, label: 'Storage status', action: openStorageStatus },
   {
     icon: IconDatabaseX,
     label: 'Reset local data',
     action: resetLocalData,
-    disabled: notes.syncing,
+    disabled: notes.syncing || !notes.editable,
     destructive: true,
   },
 ])
@@ -147,6 +154,7 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
               class="rounded-lg bg-stone-100 p-2 text-stone-800 hover:bg-stone-100"
               type="button"
               title="New note"
+              :disabled="!notes.editable"
               @click="createNote"
             >
               <PencilSquareIcon class="size-5" />
@@ -166,6 +174,7 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
               class="rounded-lg bg-stone-100 p-2 text-stone-700 hover:bg-stone-200 sm:hidden"
               type="button"
               title="Attach files"
+              :disabled="!notes.editable"
               @click="fileDialog.open()"
             >
               <IconPaperclip class="size-5" />
@@ -180,7 +189,7 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
             ref="noteEditor"
             class="h-full min-h-0 min-w-0 overflow-y-auto"
             :document-id="notes.selectedNote.id"
-            :editable="!previewMode"
+            :editable="!previewMode && notes.editable"
             :model-value="notes.selectedNote.content"
             @update:model-value="notes.updateSelected({ content: $event })"
           />
@@ -194,6 +203,10 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
         <footer
           class="flex shrink-0 items-center gap-3 self-end rounded-tl-lg bg-stone-100 px-4 py-1 text-sm text-stone-700 md:absolute md:right-0 md:bottom-0"
         >
+          <!-- Keep the editing restriction visible alongside document status, including on mobile. -->
+          <span v-if="!notes.editable" title="Close the other tab to edit here">
+            Read-only · Active in another tab
+          </span>
           <span class="hidden sm:inline"> {{ wordCount }} {{ wordCount === 1 ? 'word' : 'words' }} </span>
           <span class="hidden sm:inline">
             {{ characterCount }} {{ characterCount === 1 ? 'character' : 'characters' }}
