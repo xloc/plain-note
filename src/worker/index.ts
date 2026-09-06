@@ -5,6 +5,8 @@ import type {
   RebuildVaultRequest,
   RemoteConflictResponse,
   RemoteNoteRecord,
+  SyncGateToken,
+  SyncWaitResponse,
   Tombstone,
 } from '../shared/note'
 import {
@@ -18,6 +20,7 @@ import {
 import { getChanges, rebuildIndex, recordChange } from './index-db'
 import { clearCleanupFailure, recordCleanupFailure } from './issues'
 import { json } from './response'
+import { notifySyncGate, SyncGate, type SyncGateEnv, waitForSyncGate } from './sync-gate'
 import {
   cleanupExpiredResources,
   clearNotes,
@@ -31,11 +34,14 @@ import { requireFreeTierCapacity, storageStatusResponse, type UsageEnv } from '.
 import { isVaultKeyId, matchesVaultKey, replaceVaultKey, requireVaultKey } from './vault'
 
 type Env = AuthEnv &
+  SyncGateEnv &
   UsageEnv & {
     ASSETS: Fetcher
     DB: D1Database
     NOTES: R2Bucket
   }
+
+export { SyncGate }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -89,7 +95,12 @@ async function api(request: Request, env: Env, url: URL, sessionId: string) {
   if (request.method === 'GET' && url.pathname === '/api/sync') {
     const after = Number(url.searchParams.get('after') ?? 0)
     const generation = url.searchParams.get('generation')
-    return json(await getChanges(env, generation, Number.isFinite(after) ? after : 0))
+    const cursor = Number.isFinite(after) ? after : 0
+    if (!url.searchParams.has('wait')) return json(await getChanges(env, generation, cursor))
+
+    const gate = await waitForSyncGate(env, syncGateToken(url))
+    const changes = await getChanges(env, generation, cursor)
+    return json({ changed: changes.reset || changes.changes.length > 0, gate } satisfies SyncWaitResponse)
   }
 
   const resourceMatch = url.pathname.match(/^\/api\/notes\/([A-Za-z0-9_-]+)\/resources\/([A-Za-z0-9_-]+)$/)
@@ -105,8 +116,8 @@ async function api(request: Request, env: Env, url: URL, sessionId: string) {
 
   const id = noteMatch[1]
   if (request.method === 'GET') return readNote(env, id)
-  if (request.method === 'PUT') return writeNote(request, env, id)
-  if (request.method === 'DELETE') return deleteNote(request, env, id)
+  if (request.method === 'PUT') return notifyAfter(writeNote(request, env, id), request, env)
+  if (request.method === 'DELETE') return notifyAfter(deleteNote(request, env, id), request, env)
 
   return json({ error: 'method_not_allowed' }, 405)
 }
@@ -120,7 +131,10 @@ async function rebuildVault(request: Request, env: Env, sessionId: string) {
   const vaultError = await requireVaultKey(request, env.NOTES)
   if (vaultError) {
     // A lost success response must be retryable after the server has already installed the new key.
-    if (await matchesVaultKey(env.NOTES, body.keyId)) return json({ ok: true })
+    if (await matchesVaultKey(env.NOTES, body.keyId)) {
+      await notifySyncGate(request, env)
+      return json({ ok: true })
+    }
     return vaultError
   }
 
@@ -131,7 +145,20 @@ async function rebuildVault(request: Request, env: Env, sessionId: string) {
   await rebuildIndex(env)
   await clearCleanupFailure(env.DB)
   await replaceVaultKey(env.NOTES, body.keyId)
+  await notifySyncGate(request, env)
   return json({ ok: true })
+}
+
+async function notifyAfter(result: Promise<Response>, request: Request, env: Env) {
+  const response = await result
+  if (response.ok) await notifySyncGate(request, env)
+  return response
+}
+
+function syncGateToken(url: URL): SyncGateToken | null {
+  const generation = url.searchParams.get('gateGeneration')
+  const version = Number(url.searchParams.get('gateVersion'))
+  return generation && Number.isSafeInteger(version) && version >= 0 ? { generation, version } : null
 }
 
 async function readNote(env: Env, id: string) {

@@ -65,6 +65,16 @@ export type SyncResponse = {
   changes: Change[]
 }
 
+export type SyncGateToken = {
+  generation: string
+  version: number
+}
+
+export type SyncWaitResponse = {
+  changed: boolean
+  gate: SyncGateToken
+}
+
 export type StorageStatus = {
   usedBytes: number
   limitBytes: number

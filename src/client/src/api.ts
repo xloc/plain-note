@@ -8,7 +8,9 @@ import type {
   RemoteConflictResponse,
   EncryptedNote,
   StorageStatus,
+  SyncGateToken,
   SyncResponse,
+  SyncWaitResponse,
   Tombstone,
 } from '../../shared/note'
 import * as encryption from './encryption'
@@ -29,6 +31,12 @@ export class ApiSessionRequired extends Error {
 export class ApiNotFound extends Error {
   constructor() {
     super('Not found')
+  }
+}
+
+export class ApiAutoSyncPaused extends Error {
+  constructor(public retryAt: number) {
+    super('Automatic synchronization paused for the free-tier reset')
   }
 }
 
@@ -110,6 +118,21 @@ export async function getChanges(generation: string | null, after: number) {
   return api<SyncResponse>(`/api/sync?${query}`)
 }
 
+export async function waitForChanges(
+  generation: string | null,
+  after: number,
+  gate: SyncGateToken | null,
+  signal: AbortSignal,
+) {
+  const query = new URLSearchParams({ after: String(after), wait: '1' })
+  if (generation) query.set('generation', generation)
+  if (gate) {
+    query.set('gateGeneration', gate.generation)
+    query.set('gateVersion', String(gate.version))
+  }
+  return api<SyncWaitResponse>(`/api/sync?${query}`, { signal })
+}
+
 export async function rebuildVault(keyId = currentVault().id) {
   return api<{ ok: true }>('/api/vault/rebuild', {
     method: 'POST',
@@ -137,6 +160,9 @@ async function api<T extends object>(path: string, init?: RequestInit) {
 
 function apiError(status: number, body: object) {
   const message = 'error' in body && typeof body.error === 'string' ? body.error : `Request failed with ${status}`
+  if (message === 'auto_sync_paused' && 'retryAt' in body && typeof body.retryAt === 'number') {
+    return new ApiAutoSyncPaused(body.retryAt)
+  }
   if (message === 'vault_key_mismatch')
     return new Error('This device has a different encryption key from the cloud vault')
   if (status === 404 && message === 'not_found') return new ApiNotFound()

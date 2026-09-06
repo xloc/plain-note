@@ -118,6 +118,27 @@ test('synchronizes an encrypted cloud envelope', async ({ page }) => {
   expect(JSON.stringify(remote)).not.toContain('Server must not see this sentence')
 })
 
+test('pushes a note change to another active device', async ({ browser, page }) => {
+  const otherDevice = await browser.newContext()
+  await otherDevice.addInitScript((key) => localStorage.setItem('plain-note:vault-key', key), initialKey)
+  const otherPage = await otherDevice.newPage()
+
+  try {
+    await connectCloud(page)
+    await connectCloud(otherPage)
+
+    await page.locator('article header').getByTitle('New note').click()
+    await focusDocument(page.locator('.editor-scroll'))
+    await typeText(page.locator('.ProseMirror'), '# Live shared note')
+    await expect(page.locator('article header').getByTitle('Synced')).toBeVisible()
+
+    // The second device stays untouched; its open wait must receive the cloud change.
+    await expect(otherPage.locator('aside').getByText('Live shared note', { exact: true })).toBeVisible()
+  } finally {
+    await otherDevice.close()
+  }
+})
+
 test('warns before rebuilding without a local attachment and signs out other sessions', async ({ browser, page }) => {
   await page.goto('/')
   await page.locator('article header').getByTitle('Offline').click()
@@ -421,4 +442,14 @@ async function remoteStatus(page: Page, noteId: string, keyId: string) {
 
 async function authStatus(page: Page) {
   return page.evaluate(() => fetch('/api/auth/status').then((response) => response.status))
+}
+
+async function connectCloud(page: Page) {
+  await page.goto('/')
+  await page.locator('article header').getByTitle('Offline').click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Sign in to view sessions' }).click()
+  await expect(dialog.getByRole('button', { name: 'Sync now' })).toBeVisible()
+  await dialog.getByTitle('Close').click()
+  await expect(page.locator('article header').getByTitle('Synced')).toBeVisible()
 }

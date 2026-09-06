@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blockedLimit, requireFreeTierCapacity, storageStatusResponse } from './usage.ts'
+import { canUseSyncGate, blockedLimit, requireFreeTierCapacity, storageStatusResponse } from './usage.ts'
 
 const available = {
   d1RowsRead: 0,
@@ -156,6 +156,59 @@ test('allows operations below the cutoff', () => {
   const request = new Request('https://notes.example.com/api/notes/1', { method: 'PUT' })
   assert.equal(blockedLimit(request, available), null)
 })
+
+for (const [name, gateUsage, limit] of [
+  ['requests', { requests: 80_000, activeTime: 0 }, 'durable_object_requests'],
+  ['duration', { requests: 0, activeTime: 81_250_000_000 }, 'durable_object_duration'],
+]) {
+  test(`pauses only automatic sync near the Durable Object ${name} limit`, async (t) => {
+    let gateQueries = 0
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/graphql')) {
+        const query = JSON.parse(init.body).query
+        if (query.includes('SyncGateUsage')) {
+          gateQueries++
+          return Response.json({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    requests: [{ sum: { requests: gateUsage.requests } }],
+                    duration: [{ sum: { activeTime: gateUsage.activeTime } }],
+                  },
+                ],
+              },
+            },
+          })
+        }
+        return Response.json({ data: { viewer: { accounts: [{ d1: [], r2: [] }] } } })
+      }
+      if (url.includes('/d1/database?')) return Response.json({ success: true, result: [] })
+      if (url.endsWith('/r2/metrics')) return Response.json({ success: true, result: {} })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const env = {
+      CLOUDFLARE_ACCOUNT_ID: `sync-gate-${name}`,
+      CLOUDFLARE_USAGE_TOKEN: 'token',
+      NOTES: emptyBucket,
+    }
+    const response = await requireFreeTierCapacity(
+      new Request('https://notes.example.com/api/sync?after=0&wait=1'),
+      env,
+    )
+    const body = await response.json()
+
+    assert.equal(response.status, 429)
+    assert.equal(body.error, 'auto_sync_paused')
+    assert.equal(body.limit, limit)
+    assert.ok(body.retryAt > Date.now())
+    assert.equal(await canUseSyncGate(new Request('https://notes.example.com/api/notes/1'), env), false)
+    assert.equal(await requireFreeTierCapacity(new Request('https://notes.example.com/api/sync?after=0'), env), null)
+    assert.equal(gateQueries, 1)
+  })
+}
 
 test('uses account-wide Cloudflare usage', async () => {
   const originalFetch = globalThis.fetch

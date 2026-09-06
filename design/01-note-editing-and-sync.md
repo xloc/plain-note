@@ -19,6 +19,7 @@ Deliver the smallest usable path from an offline Vue editor through IndexedDB sy
 ```text
 GET    /api/health
 GET    /api/sync?generation=<id>&after=<sequence>
+GET    /api/sync?generation=<id>&after=<sequence>&wait=1
 GET    /api/notes/<id>
 PUT    /api/notes/<id>
 DELETE /api/notes/<id>
@@ -29,6 +30,12 @@ DELETE /api/notes/<id>
 The sync response contains the current D1 generation, a cursor, and changed note identifiers. A generation mismatch returns a complete index snapshot and tells the client to reset its cursor.
 
 Generation does not define note identity. A local note missing from a reset snapshot keeps its UUID and is uploaded; only an explicit tombstone deletes it.
+
+## Automatic synchronization
+
+An active device keeps one vault-wide long-poll request open. Successful note writes, deletions, and vault rebuilds wake every waiter through one shared Durable Object. The client then runs the normal synchronization path, so automatic and manual synchronization cannot diverge.
+
+The gate is only a hint. Every wake and 25-second timeout checks the D1 index, which recovers a missed notification or a restarted Durable Object without storing note state in the gate. A device is considered active while it renews this request; correctness does not depend on focus or visibility events.
 
 ## Storage decisions
 

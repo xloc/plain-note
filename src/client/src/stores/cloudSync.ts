@@ -1,6 +1,7 @@
 import { useOnline } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
+import type { SyncGateToken } from '../../../shared/note'
 import * as api from '../api'
 import { useAuthStore } from './auth'
 import { useNotesStore } from './notes'
@@ -12,18 +13,49 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   const vault = useVaultStore()
   const online = useOnline()
   const rebuilding = ref(false)
-  const canSync = computed(
-    () => online.value && auth.state === 'ready' && vault.state === 'ready' && notes.editable && !rebuilding.value,
+  const autoSyncReady = computed(
+    () => auth.state === 'ready' && vault.state === 'ready' && notes.ready && notes.editable && !rebuilding.value,
   )
+  const canSync = computed(() => online.value && autoSyncReady.value)
   let syncTimer: number | undefined
+  let gate: SyncGateToken | null = null
 
-  async function sync() {
-    if (!canSync.value || notes.syncing) return
+  function sync() {
+    return runSync(canSync.value)
+  }
+
+  async function runSync(ready: boolean) {
+    if (!ready || notes.syncing) return
     try {
       await notes.sync()
     } catch (error) {
       if (error instanceof api.ApiSessionRequired) auth.signOut()
     }
+  }
+
+  async function listen(signal: AbortSignal) {
+    while (!signal.aborted && autoSyncReady.value) {
+      try {
+        const position = await notes.syncPosition()
+        if (signal.aborted || !autoSyncReady.value) return
+        const response = await api.waitForChanges(position.generation, position.cursor, gate, signal)
+        gate = response.gate
+        if (response.changed) await runSync(autoSyncReady.value)
+      } catch (error) {
+        if (signal.aborted) return
+        if (error instanceof api.ApiSessionRequired) {
+          auth.signOut()
+          return
+        }
+        if (error instanceof api.ApiAutoSyncPaused) await pauseUntil(error.retryAt)
+        else await pauseUntil(Date.now() + 5_000)
+      }
+    }
+  }
+
+  async function pauseUntil(time: number) {
+    // The server rejects gate requests too; this timer only prevents a noisy retry loop.
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1_000, time - Date.now())))
   }
 
   function scheduleSync() {
@@ -83,12 +115,23 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
   }
 
   watch(() => notes.syncRequest, scheduleSync)
+  watch([() => auth.state, () => vault.state, () => notes.ready, () => notes.editable], () => {
+    if (autoSyncReady.value) void sync()
+  })
   watch(
-    [online, () => auth.state, () => vault.state, () => notes.ready],
-    ([isOnline, authState, vaultState, notesReady]) => {
-      if (isOnline && authState === 'ready' && vaultState === 'ready' && notesReady) void sync()
+    autoSyncReady,
+    (ready, _, onCleanup) => {
+      if (!ready) return
+      const controller = new AbortController()
+      // Synchronous cleanup stops old-key waits before a rebuild can replace the vault.
+      onCleanup(() => controller.abort())
+      void listen(controller.signal)
     },
+    { flush: 'sync', immediate: true },
   )
+  watch(online, (isOnline) => {
+    if (isOnline && autoSyncReady.value) void sync()
+  })
 
   return { online, canSync, rebuilding, sync, resetLocalData, rotateKey, rebuildCloud }
 })

@@ -29,6 +29,8 @@ const limits = {
   r2ClassA: 1_000_000,
   r2ClassB: 10_000_000,
   r2StorageBytes: 10_000_000_000,
+  syncGateRequests: 100_000,
+  syncGateDuration: 13_000,
 }
 const r2ClassA = new Set([
   'CompleteMultipartUpload',
@@ -65,6 +67,7 @@ const r2Free = new Set([
   'GetBucketSippyConfiguration',
 ])
 const usageCache = new Map<string, { expiresAt: number; value: Promise<Usage> }>()
+const syncGateUsageCache = new Map<string, { expiresAt: number; value: Promise<SyncGateUsage> }>()
 const inventoryCache = new WeakMap<object, { expiresAt: number; value: StorageInventory }>()
 
 export async function storageStatusResponse(request: Request, env: UsageEnv & { DB: D1Database; NOTES: R2Bucket }) {
@@ -117,9 +120,25 @@ export async function requireFreeTierCapacity(request: Request, env: UsageEnv & 
   try {
     const usage = await getUsage(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_USAGE_TOKEN)
     const limit = blockedLimit(request, usage)
-    return limit ? limitError(limit) : null
+    if (limit) return limitError(limit)
+    if (!isAutoSync(request)) return null
+
+    const syncGateLimit = blockedSyncGateLimit(
+      await getSyncGateUsage(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_USAGE_TOKEN),
+    )
+    return syncGateLimit ? syncGateLimitError(syncGateLimit) : null
   } catch {
     return error('usage_unavailable', 503)
+  }
+}
+
+export async function canUseSyncGate(request: Request, env: UsageEnv) {
+  if (isLocalRequest(request)) return true
+  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_USAGE_TOKEN) return false
+  try {
+    return !blockedSyncGateLimit(await getSyncGateUsage(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_USAGE_TOKEN))
+  } catch {
+    return false
   }
 }
 
@@ -165,8 +184,25 @@ function isMutation(request: Request) {
   return (request.method === 'PUT' || request.method === 'DELETE') && path.startsWith('/api/notes/')
 }
 
+function isAutoSync(request: Request) {
+  const url = new URL(request.url)
+  return request.method === 'GET' && url.pathname === '/api/sync' && url.searchParams.has('wait')
+}
+
 function limitError(limit: string) {
   return json({ error: 'free_tier_limit_near', limit }, 503)
+}
+
+function blockedSyncGateLimit(usage: SyncGateUsage) {
+  if (usage.requests >= limits.syncGateRequests * CUTOFF) return 'durable_object_requests'
+  if (usage.duration >= limits.syncGateDuration * CUTOFF) return 'durable_object_duration'
+  return null
+}
+
+function syncGateLimitError(limit: string) {
+  const now = new Date()
+  const retryAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
+  return json({ error: 'auto_sync_paused', limit, retryAt }, 429)
 }
 
 async function getUsage(accountId: string, token: string) {
@@ -181,6 +217,24 @@ async function getUsage(accountId: string, token: string) {
     usageCache.delete(accountId)
     // Keep upstream diagnostics server-side and redact the token even if an error echoes it.
     console.error('Cloudflare usage check failed', String(cause).replaceAll(token, '[redacted]'))
+    throw cause
+  }
+}
+
+async function getSyncGateUsage(accountId: string, token: string) {
+  const today = new Date().toISOString().slice(0, 10)
+  const key = `${accountId}:${today}`
+  const cached = syncGateUsageCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+
+  const value = fetchSyncGateUsage(accountId, token, today)
+  syncGateUsageCache.set(key, { expiresAt: Date.now() + CACHE_MS, value })
+  try {
+    return await value
+  } catch (cause) {
+    syncGateUsageCache.delete(key)
+    // Gate analytics can fail independently without blocking manual synchronization.
+    console.error('Cloudflare sync gate usage check failed', String(cause).replaceAll(token, '[redacted]'))
     throw cause
   }
 }
@@ -269,6 +323,43 @@ async function fetchAnalytics(accountId: string, token: string, today: string, r
   return body.data.viewer.accounts[0]
 }
 
+async function fetchSyncGateUsage(accountId: string, token: string, today: string): Promise<SyncGateUsage> {
+  const body = await fetchOrThrow<{ data?: { viewer: { accounts: SyncGateAnalytics[] } } }>(
+    'https://api.cloudflare.com/client/v4/graphql',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query SyncGateUsage($accountTag: string!, $today: Date!) {
+        viewer {
+          accounts(filter: { accountTag: $accountTag }) {
+            requests: durableObjectsInvocationsAdaptiveGroups(
+              limit: 10000
+              filter: { date_geq: $today, date_leq: $today }
+            ) { sum { requests } }
+            duration: durableObjectsPeriodicGroups(
+              limit: 10000
+              filter: { date_geq: $today, date_leq: $today }
+            ) { sum { activeTime } }
+          }
+        }
+      }`,
+        variables: { accountTag: accountId, today },
+      }),
+    },
+  )
+  if (body.data?.viewer.accounts.length !== 1)
+    throw new Error('Cloudflare GraphQL sync gate response must contain exactly one account')
+
+  const analytics = body.data.viewer.accounts[0]
+  const activeMicroseconds = analytics.duration.reduce((total, group) => total + (group.sum.activeTime ?? 0), 0)
+  return {
+    requests: analytics.requests.reduce((total, group) => total + (group.sum.requests ?? 0), 0),
+    // Durable Objects reserve 128 MB; activeTime is reported in microseconds.
+    duration: (activeMicroseconds * 0.128) / 1_000_000,
+  }
+}
+
 async function cloudflare<T>(url: string, headers: HeadersInit) {
   const body = await fetchOrThrow<{ success: boolean; result: T }>(url, { headers })
   if (!body.success) throw new Error(`Cloudflare usage response missing success: ${url}`)
@@ -305,6 +396,16 @@ function storageBytes(metrics?: R2StorageClass) {
 type Analytics = {
   d1: { sum: { rowsRead?: number; rowsWritten?: number } }[]
   r2: { dimensions: { actionType: string }; sum: { requests?: number } }[]
+}
+
+type SyncGateAnalytics = {
+  requests: { sum: { requests?: number } }[]
+  duration: { sum: { activeTime?: number } }[]
+}
+
+type SyncGateUsage = {
+  requests: number
+  duration: number
 }
 
 type R2StorageClass = {

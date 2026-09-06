@@ -25,4 +25,18 @@
       "database_name": "plain-note",
     },
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SYNC_GATE",
+        "class_name": "SyncGate",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1-sync-gate",
+      "new_sqlite_classes": ["SyncGate"],
+    },
+  ],
 }

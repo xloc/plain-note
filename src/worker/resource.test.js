@@ -3,6 +3,9 @@ import worker from './index.ts'
 import { cleanupResources, putNote } from './storage.ts'
 
 const vaultHeaders = { 'X-Vault-Key-Id': 'a'.repeat(43) }
+const syncGate = {
+  getByName: () => ({ fetch: async () => Response.json({ generation: 'gate', version: 0 }) }),
+}
 
 class Bucket {
   objects = new Map()
@@ -111,7 +114,7 @@ class DB {
 
 test('uploads, repairs, and downloads opaque resource ciphertext by UUID', async () => {
   const bucket = new Bucket()
-  const env = { NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   const url = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
 
   const upload = await worker.fetch(
@@ -161,7 +164,7 @@ test('uploads, repairs, and downloads opaque resource ciphertext by UUID', async
 
 test('rejects a different vault key before returning ciphertext', async () => {
   const bucket = new Bucket()
-  const env = { NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   const url = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
   await worker.fetch(new Request(url, { method: 'PUT', headers: vaultHeaders, body: 'ciphertext' }), env)
 
@@ -173,7 +176,7 @@ test('rejects a different vault key before returning ciphertext', async () => {
 
 test('rejects an invalid clear update timestamp', async () => {
   const bucket = new Bucket()
-  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { DB: new DB(), NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   const response = await worker.fetch(
     new Request('http://localhost:8787/api/notes/note-id', {
       method: 'PUT',
@@ -199,7 +202,7 @@ test('rejects an invalid clear update timestamp', async () => {
 test('rebuilds the cloud vault with a new key identifier', async () => {
   const bucket = new Bucket()
   const db = new DB()
-  const env = { DB: db, NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { DB: db, NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   const resourceUrl = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
   await worker.fetch(new Request(resourceUrl, { method: 'PUT', headers: vaultHeaders, body: 'ciphertext' }), env)
   await putNote(
@@ -262,7 +265,7 @@ test('rebuilds the cloud vault with a new key identifier', async () => {
 
 test('rebuilds legacy cloud data with the current key without parsing it', async () => {
   const bucket = new Bucket()
-  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { DB: new DB(), NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   await worker.fetch(
     new Request('http://localhost:8787/api/notes/note-id/resources/resource-id', {
       method: 'PUT',
@@ -303,7 +306,7 @@ test('cleans up expired unreferenced uploads', async () => {
 
 test('does not run destructive resource cleanup inline with a note commit', async () => {
   const bucket = new Bucket()
-  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { DB: new DB(), NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   const note = {
     id: 'note-id',
     updatedAt: 1,
@@ -394,7 +397,7 @@ test('records and surfaces a scheduled cleanup failure', async () => {
 
 test('defers resource removal until ownership has remained unchanged for the grace period', async () => {
   const bucket = new Bucket()
-  const env = { DB: new DB(), NOTES: bucket, TEST_AUTH_BYPASS: true }
+  const env = { DB: new DB(), NOTES: bucket, SYNC_GATE: syncGate, TEST_AUTH_BYPASS: true }
   const resourceUrl = 'http://localhost:8787/api/notes/note-id/resources/resource-id'
   await worker.fetch(
     new Request(resourceUrl, {

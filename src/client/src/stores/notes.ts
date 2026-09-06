@@ -469,8 +469,7 @@ export const useNotesStore = defineStore('notes', () => {
   }
 
   async function pullChanges() {
-    let generation = String((await db.getMeta('generation')) ?? '') || null
-    let cursor = Number((await db.getMeta('cursor')) ?? 0)
+    let { generation, cursor } = await syncPosition()
     let firstPage = true
 
     while (true) {
@@ -503,6 +502,13 @@ export const useNotesStore = defineStore('notes', () => {
     }
     if (!selectedNote.value) {
       selectFirstNote()
+    }
+  }
+
+  async function syncPosition() {
+    return {
+      generation: String((await db.getMeta('generation')) ?? '') || null,
+      cursor: Number((await db.getMeta('cursor')) ?? 0),
     }
   }
 
@@ -659,5 +665,6 @@ export const useNotesStore = defineStore('notes', () => {
     prepareCloudRebuild,
     uploadCloudRebuild,
     sync,
+    syncPosition,
   }
 })
