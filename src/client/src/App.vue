@@ -10,7 +10,7 @@ import {
   IconTrash,
 } from '@tabler/icons-vue'
 import { useFileDialog, useStorage, useSwipe } from '@vueuse/core'
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, ref, useTemplateRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCloudStatus } from './cloudStatus'
 import CloudStatusIcon from './components/CloudStatusIcon.vue'
@@ -42,15 +42,27 @@ const cloud = useCloudStatus()
 let swipeFromEdge = false
 const openSyncStatus = () => void router.push({ query: { ...route.query, sessions: '1' } })
 const openStorageStatus = () => void router.push({ query: { ...route.query, storage: '1' } })
-const createNote = () => {
+const createNote = async () => {
   if (!notes.editable) return
   showNoteList.value = false
   previewMode.value = false
   void notes.createNote()
+  await nextTick()
+  noteEditor.value?.focus(true)
 }
-const openNote = (id: string) => {
+const openNote = async (id: string) => {
+  const changed = notes.selectedId !== id
   showNoteList.value = false
-  void openNoteRoute(id)
+  await openNoteRoute(id)
+  await nextTick()
+  if (notes.selectedId === id) noteEditor.value?.focus(changed)
+}
+const setPreviewMode = async (preview: boolean) => {
+  previewMode.value = preview
+  if (!preview) {
+    await nextTick()
+    noteEditor.value?.focus(true)
+  }
 }
 const showImportedNote = () => {
   showNoteList.value = false
@@ -180,7 +192,7 @@ const noteMenuItems = computed<PopupMenuItem[]>(() => [
               <IconPaperclip class="size-5" />
             </button>
             <NoteResources @remove="noteEditor?.removeResource($event)" />
-            <EditorModeToggle v-model="previewMode" />
+            <EditorModeToggle :model-value="previewMode" @update:model-value="setPreviewMode" />
             <PopupMenu :items="noteMenuItems" />
           </div>
         </header>

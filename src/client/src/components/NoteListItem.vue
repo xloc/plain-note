@@ -5,8 +5,8 @@ import { useTemplateRef } from 'vue'
 import type { LocalNote } from '../db'
 import { formatDateTime, notePreview, noteTitle } from '../presentation'
 
-const props = defineProps<{ note: LocalNote; selected: boolean; revealed: boolean }>()
-const emit = defineEmits<{ open: []; reveal: []; close: []; delete: [] }>()
+const props = defineProps<{ note: LocalNote; searchTerms: string[]; selected: boolean; revealed: boolean }>()
+const emit = defineEmits<{ open: []; reveal: []; close: []; delete: []; contextmenu: [event: MouseEvent] }>()
 const row = useTemplateRef<HTMLElement>('row')
 
 useSwipe(row, {
@@ -27,8 +27,9 @@ function open() {
 </script>
 
 <template>
-  <div ref="row" class="relative overflow-hidden border-b border-stone-200 last:border-b-0">
+  <div ref="row" data-note-row class="relative overflow-hidden border-b border-stone-200 last:border-b-transparent">
     <button
+      v-if="revealed"
       class="absolute inset-y-0 right-0 flex w-30 items-center justify-center gap-1 bg-red-500 text-white"
       type="button"
       title="Delete note"
@@ -42,6 +43,7 @@ function open() {
       :class="{ '-translate-x-30': revealed, 'md:bg-violet-100': selected }"
       type="button"
       @click="open"
+      @contextmenu.prevent.stop="emit('contextmenu', $event)"
     >
       <div class="flex">
         <div class="min-w-0 flex-1 truncate text-lg font-semibold text-stone-800 md:text-base">
@@ -51,7 +53,7 @@ function open() {
       </div>
       <div class="flex gap-2 text-sm text-stone-500 md:text-xs">
         <span class="shrink-0">{{ formatDateTime(note.updatedAt) }}</span>
-        <span class="truncate">{{ notePreview(note.content) }}</span>
+        <span class="truncate">{{ notePreview(note.content, searchTerms) }}</span>
       </div>
     </button>
   </div>

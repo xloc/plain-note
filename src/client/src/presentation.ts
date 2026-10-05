@@ -4,7 +4,17 @@ export function noteTitle(content: string) {
   return noteHeading(content)?.[1].trim() || 'Untitled'
 }
 
-export function notePreview(content: string) {
+export function notePreview(content: string, searchTerms: string[] = []) {
+  if (searchTerms.length) {
+    const text = content.replace(/\s+/g, ' ').trim()
+    const lower = text.toLowerCase()
+    const match = Math.min(...searchTerms.map((term) => lower.indexOf(term)))
+    if (match >= 0) {
+      const start = Math.max(0, match - 12)
+      const end = start + 80
+      return `${start ? '…' : ''}${text.slice(start, end).trim()}${end < text.length ? '…' : ''}`
+    }
+  }
   const heading = noteHeading(content)
   const body = heading ? content.slice(heading[0].length) : content
   return body.replace(/\n+/g, ' ').trim().slice(0, 80) || 'Empty'
@@ -32,6 +42,44 @@ export function groupNotesByUpdatedAt(notes: LocalNote[]) {
       notes: notes.filter((note) => note.updatedAt < Math.min(month.getTime(), week.getTime())),
     },
   ].filter((section) => section.notes.length)
+}
+
+export const NOTE_LIST_OVERSCAN = 5
+
+export function windowNoteSections(
+  sections: ReturnType<typeof groupNotesByUpdatedAt>,
+  geometry: {
+    scrollTop: number
+    viewportHeight: number
+    rowHeight: number
+    headingHeight: number
+    sectionGap: number
+    paddingTop: number
+  },
+) {
+  let top = geometry.paddingTop
+  return sections.map((section) => {
+    const rowsTop = top + geometry.headingHeight
+    const count = section.notes.length
+    const start = geometry.rowHeight
+      ? Math.min(
+          count,
+          Math.max(0, Math.floor((geometry.scrollTop - rowsTop) / geometry.rowHeight) - NOTE_LIST_OVERSCAN),
+        )
+      : 0
+    const end = geometry.rowHeight
+      ? Math.min(
+          count,
+          Math.max(
+            0,
+            Math.ceil((geometry.scrollTop + geometry.viewportHeight - rowsTop) / geometry.rowHeight) +
+              NOTE_LIST_OVERSCAN,
+          ),
+        )
+      : Math.min(count, 1)
+    top = rowsTop + count * geometry.rowHeight + geometry.sectionGap
+    return { ...section, start, end, rowsTop }
+  })
 }
 
 export function formatSize(size?: number) {

@@ -10,9 +10,10 @@ import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-li
 import { type Command, EditorState, NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import { CellSelection, deleteColumn, deleteRow, deleteTable, goToNextCell, tableEditing } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
-import { computed, nextTick, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import type { NoteResource } from '../../../shared/note'
 import { autoLinks } from '../editor/autoLinks'
+import { restoreCaret, updateEditorDocument } from '../editor/caret'
 import { DetailsView } from '../editor/DetailsView'
 import {
   containsFiles,
@@ -353,9 +354,23 @@ async function removeResource(id: string) {
   await notes.removeResource(props.documentId, id)
 }
 
-defineExpose({ attachFiles, removeResource })
+function focus(revealCaret = false) {
+  if (!props.editable || !view) return
+  view.focus()
+  notes.caretPositions[props.documentId] = view.state.selection.head
+  if (revealCaret) {
+    view.dispatch(view.state.tr.scrollIntoView())
+    // The desktop header overlays the scrolling document; keep the caret below it.
+    const top = editor.value!.getBoundingClientRect().top + parseFloat(getComputedStyle(view.dom).paddingTop)
+    const caretTop = view.coordsAtPos(view.state.selection.head).top
+    if (caretTop < top) editor.value!.scrollTop -= top - caretTop
+  }
+}
+
+defineExpose({ attachFiles, removeResource, focus })
 
 onMounted(() => {
+  const document = withTrailingParagraph(markdownParser.parse(props.modelValue))
   view = new EditorView(editor.value!, {
     attributes: { class: 'px-4 py-2 md:pt-[var(--editor-header-space)] outline-none' },
     editable: () => props.editable,
@@ -398,11 +413,13 @@ onMounted(() => {
     },
     handlePaste,
     state: EditorState.create({
-      doc: withTrailingParagraph(markdownParser.parse(props.modelValue)),
+      doc: document,
+      selection: restoreCaret(document, notes.caretPositions[props.documentId]),
       plugins: plugins(),
     }),
     dispatchTransaction(transaction) {
       view!.updateState(view!.state.apply(transaction))
+      if (props.editable) notes.caretPositions[props.documentId] = view!.state.selection.head
       if (transaction.docChanged) {
         emit('update:modelValue', markdown())
       }
@@ -412,16 +429,28 @@ onMounted(() => {
 })
 
 watch(
-  () => props.modelValue,
-  (content) => {
-    if (!view || content === markdown()) return
-    view.updateState(
-      EditorState.create({
-        doc: withTrailingParagraph(markdownParser.parse(content)),
-        plugins: plugins(),
-      }),
-    )
+  [() => props.documentId, () => props.modelValue],
+  ([documentId, content], [previousId]) => {
+    if (!view) return
+    if (documentId === previousId && content === markdown()) return
+    const document = withTrailingParagraph(markdownParser.parse(content))
+    if (documentId !== previousId) {
+      scrollPositions.save(previousId, editor.value!.scrollTop)
+      scrollPositions.flush()
+      view.updateState(
+        EditorState.create({
+          doc: document,
+          selection: restoreCaret(document, notes.caretPositions[documentId]),
+          plugins: plugins(),
+        }),
+      )
+      restoreScrollPosition(documentId)
+    } else {
+      view.updateState(updateEditorDocument(view.state, document))
+      if (props.editable) notes.caretPositions[documentId] = view.state.selection.head
+    }
   },
+  { flush: 'post' },
 )
 watch(
   [() => currentNote.value?.resources, () => notes.resourceProgress],
@@ -437,15 +466,15 @@ watch(
     view?.setProps({ editable: () => editable })
     resourceViews.forEach((resourceView) => resourceView.refresh())
     imageViews.forEach((imageView) => imageView.refresh())
-    if (!editable) view?.dom.blur()
-  },
-)
-watch(
-  () => props.documentId,
-  async (documentId) => {
-    scrollPositions.flush()
-    await nextTick()
-    restoreScrollPosition(documentId)
+    if (editable && view) {
+      view.updateState(
+        view.state.apply(
+          view.state.tr.setSelection(restoreCaret(view.state.doc, notes.caretPositions[props.documentId])),
+        ),
+      )
+    } else {
+      view?.dom.blur()
+    }
   },
 )
 

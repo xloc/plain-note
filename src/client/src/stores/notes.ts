@@ -17,6 +17,7 @@ type NewNote = Pick<Note, 'content' | 'tags' | 'resources' | 'createdAt' | 'upda
 export const useNotesStore = defineStore('notes', () => {
   const notes = ref<db.LocalNote[]>([])
   const selectedId = useStorage<string | null>('plain-note:selected-note-id', null)
+  const caretPositions = ref<Record<string, number>>({})
   const ready = ref(false)
   const editable = ref(true)
   const syncing = ref(false)
@@ -89,6 +90,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   async function removeLocalNote(id: string) {
     notes.value = notes.value.filter((note) => note.id !== id)
+    delete caretPositions.value[id]
     detachedResources.delete(id)
     await Promise.all([db.removeNote(id), db.removeNoteResources(id)])
   }
@@ -282,6 +284,7 @@ export const useNotesStore = defineStore('notes', () => {
     if (!editable.value) return
     await db.clearLocalData()
     notes.value = []
+    caretPositions.value = {}
     selectedId.value = null
     syncMessage.value = 'Local only'
   }
@@ -640,6 +643,7 @@ export const useNotesStore = defineStore('notes', () => {
   return {
     notes,
     selectedId,
+    caretPositions,
     ready,
     editable,
     syncing,

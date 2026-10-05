@@ -13,6 +13,22 @@ Use a fixed two-panel layout:
 
 The sidebar favors brief note identity: title, one-line preview, and a non-synced state when needed. The title comes from the first level-one heading, otherwise “Untitled.”
 
+On desktop, right-clicking a note opens a popup with a “Delete note” action without selecting it. On mobile, swiping a note left reveals its delete button.
+
+## Search
+
+A search field stays above the scrolling note list, directly below the “Notes” heading on mobile. It has a magnifying-glass icon, a “Search notes” placeholder, and a clear button while text is entered.
+
+Search filters locally available notes as the user types. It matches all whitespace-separated query words anywhere in the Markdown content, including the title, without regard to capitalization. Results retain their existing newest-first ordering and date groups, with a short excerpt around the first match. An empty result shows “No matching notes.”
+
+Filtering never changes the open note. Selecting a result uses normal note navigation; clearing the field restores the full list. Results update as notes are edited or synchronized and remain available offline. The query is temporary and is not saved across reloads.
+
+Search scans in small batches that yield to typing and rendering. It pauses once enough matches fill the viewport and a small buffer, then resumes as the user scrolls. Changing the query cancels the previous scan. Only visible note rows and a small buffer are mounted; spacers preserve scrolling and the date groups.
+
+While scanning actively for more than 200 ms, a small spinner replaces the magnifying glass in the same position. It returns to the magnifying glass as soon as scanning completes or pauses, and the clear button remains available. “No matching notes” appears only after a complete scan finds nothing.
+
+Fuzzy matching, highlights inside the editor, and searching attachment contents are deferred.
+
 ## Editing
 
 Edit Markdown as a rich document, while retaining Markdown as the stored format. The editor supports the core note structures—headings, paragraphs, lists, tables, quotations, code, and dividers—through direct editing, Markdown input rules, and keyboard shortcuts.
@@ -25,6 +41,9 @@ The main interaction choices are:
 - Typing `| ` at the start of a paragraph creates a blockquote. The stored Markdown still uses the standard `> ` quote syntax.
 - The visible screen, edit/preview mode, and last open note are remembered locally so reopening the app resumes the same context.
 - Each note has a canonical bookmarkable route at `/notes/<uuid>`. Browser back and forward restore the corresponding selected note.
+- Selecting a note from the list in edit mode restores its last caret position, focuses the editor, and scrolls only as needed to show the caret. Caret positions are remembered for the current app session; a note without a remembered position opens ready to append at the end.
+- Creating a note or explicitly switching from preview to edit mode focuses the editor immediately. Clicking the current note returns focus without moving the caret or scrolling. Preview mode, search, dialogs, and background synchronization never request editor focus.
+- Background content updates preserve the current selection through the changed document rather than resetting it to the beginning.
 - Scroll positions for the five most recently viewed notes are remembered locally for five minutes.
 - The editor header stays fixed while document content scrolls beneath it. Trailing viewport space allows the whole document to scroll above the viewport, and clicking that space places the cursor at the document end.
 - The document is centered at a maximum width of `72ch` for readable lines. Wide tables scroll horizontally within their own region instead of widening the page.
@@ -75,4 +94,4 @@ A selected note can be exported as plain Markdown, Markdown with YAML metadata, 
 
 ## Scope
 
-This document records enduring interface choices, not a complete feature inventory. Search, tags, and resource management are outside the current interface.
+This document records enduring interface choices, not a complete feature inventory. Tag management remains outside the current interface.
