@@ -45,6 +45,19 @@ export async function createAppSession(request: Request, env: Env) {
   return setSessionCookies(json({ ok: true }), request, token, clientKey, SESSION_MS / 1000)
 }
 
+export function accessLogin(request: Request) {
+  const url = new URL(request.url)
+  let location = new URL('/', url.origin).href
+  try {
+    const target = new URL(url.searchParams.get('redirect') ?? '/', url.origin)
+    // Keep the origin in Location: a same-origin path can itself start with //.
+    if (target.origin === url.origin) location = target.href
+  } catch {
+    // Malformed return URLs go to the app root.
+  }
+  return new Response(null, { status: 302, headers: { 'Cache-Control': 'no-store', Location: location } })
+}
+
 export async function requireAppSession(request: Request, env: Env): Promise<AppSessionIdentity | Response> {
   if (isLocalRequest(request) && env.TEST_AUTH_BYPASS) return { id: 'test' }
   await ensureSchema(env.DB)

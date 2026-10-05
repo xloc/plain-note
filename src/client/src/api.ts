@@ -14,17 +14,13 @@ import type {
   Tombstone,
 } from '../../shared/note'
 import * as encryption from './encryption'
+import * as http from './http'
+import { useAuthStore } from './stores/auth'
 import { currentVault } from './stores/vault'
 
 export class ApiConflict extends Error {
   constructor(public current: ConflictResponse['current']) {
     super('The note changed on another device')
-  }
-}
-
-export class ApiSessionRequired extends Error {
-  constructor() {
-    super('Session required')
   }
 }
 
@@ -78,35 +74,23 @@ export async function putResource(
 ) {
   const vault = currentVault()
   const encrypted = await encryption.resource.encrypt(blob, noteId, resource.id, vault.key)
-  return new Promise<void>((resolve, reject) => {
-    const request = new XMLHttpRequest()
-    request.open('PUT', `/api/notes/${noteId}/resources/${resource.id}`)
-    request.setRequestHeader('Content-Type', 'application/octet-stream')
-    request.setRequestHeader('X-Vault-Key-Id', vault.id)
-    request.upload.onprogress = (event) => onProgress(event.total ? event.loaded / event.total : 0)
-    request.onerror = () => reject(new Error('Resource upload failed'))
-    request.onload = () => {
-      const body = JSON.parse(request.responseText) as { ok: true } | { error: string }
-      if (request.status < 200 || request.status >= 300) {
-        reject(apiError(request.status, body))
-      } else {
-        onProgress(1)
-        resolve()
-      }
-    }
-    request.send(encrypted)
-  })
+  return cloudRequest(() =>
+    http.upload(
+      `/api/notes/${noteId}/resources/${resource.id}`,
+      encrypted,
+      { 'Content-Type': 'application/octet-stream', 'X-Vault-Key-Id': vault.id },
+      onProgress,
+    ),
+  )
 }
 
 export async function getResource(noteId: string, resource: NoteResource) {
   const vault = currentVault()
-  const response = await fetch(`/api/notes/${noteId}/resources/${resource.id}`, {
-    headers: { 'X-Vault-Key-Id': vault.id },
-  })
-  if (!response.ok) {
-    const body = (await response.json()) as { error?: string }
-    throw apiError(response.status, body)
-  }
+  const response = await cloudRequest(() =>
+    http.fetchResponse(`/api/notes/${noteId}/resources/${resource.id}`, {
+      headers: { 'X-Vault-Key-Id': vault.id },
+    }),
+  )
   return encryption.resource.decrypt(await response.blob(), noteId, resource.id, resource.mime, vault.key)
 }
 
@@ -144,27 +128,26 @@ async function api<T extends object>(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers)
   headers.set('X-Vault-Key-Id', currentVault().id)
   if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  const response = await fetch(path, { ...init, headers })
-  const body = (await response.json()) as T | RemoteConflictResponse | { error: string }
-  if (response.status === 409) {
-    const current = (body as RemoteConflictResponse).current
-    throw new ApiConflict(await encryption.record.decrypt(current, currentVault().key))
-  }
-
-  if (!response.ok) {
-    throw apiError(response.status, body)
-  }
-
-  return body as T
+  return cloudRequest(() => http.request<T>(path, { ...init, headers }))
 }
 
-function apiError(status: number, body: object) {
-  const message = 'error' in body && typeof body.error === 'string' ? body.error : `Request failed with ${status}`
-  if (message === 'auto_sync_paused' && 'retryAt' in body && typeof body.retryAt === 'number') {
-    return new ApiAutoSyncPaused(body.retryAt)
+async function cloudRequest<T>(operation: () => Promise<T>) {
+  try {
+    return await useAuthStore().withSession(operation)
+  } catch (error) {
+    if (!(error instanceof http.HttpError)) throw error
+    const body = error.body
+    if (error.status === 409 && body?.error === 'conflict') {
+      const current = (body as RemoteConflictResponse).current
+      throw new ApiConflict(await encryption.record.decrypt(current, currentVault().key))
+    }
+    if (body?.error === 'auto_sync_paused' && typeof body.retryAt === 'number') {
+      throw new ApiAutoSyncPaused(body.retryAt)
+    }
+    if (body?.error === 'vault_key_mismatch') {
+      throw new Error('This device has a different encryption key from the cloud vault')
+    }
+    if (error.status === 404 && body?.error === 'not_found') throw new ApiNotFound()
+    throw error
   }
-  if (message === 'vault_key_mismatch')
-    return new Error('This device has a different encryption key from the cloud vault')
-  if (status === 404 && message === 'not_found') return new ApiNotFound()
-  return status === 401 && message === 'session_required' ? new ApiSessionRequired() : new Error(message)
 }

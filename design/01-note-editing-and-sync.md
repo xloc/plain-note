@@ -37,6 +37,8 @@ An active device keeps one vault-wide long-poll request open. Successful note wr
 
 The gate is only a hint. Every wake and 25-second timeout checks the D1 index, which recovers a missed notification or a restarted Durable Object without storing note state in the gate. A device is considered active while it renews this request; correctness does not depend on focus or visibility events.
 
+After a successful write, a background notification is used instead of delaying the response to the writing device while waking other devices' long-poll requests. If the notification is delayed or fails, their next periodic sync check still discovers the change.
+
 ## Storage decisions
 
 - A logical note has one stable R2 key: `notes/<id>/note.md`.

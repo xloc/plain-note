@@ -28,8 +28,8 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
     if (!ready || notes.syncing) return
     try {
       await notes.sync()
-    } catch (error) {
-      if (error instanceof api.ApiSessionRequired) auth.signOut()
+    } catch {
+      // The notes store reports sync failures; the auth store handles session expiry.
     }
   }
 
@@ -42,11 +42,7 @@ export const useCloudSyncStore = defineStore('cloudSync', () => {
         gate = response.gate
         if (response.changed) await runSync(autoSyncReady.value)
       } catch (error) {
-        if (signal.aborted) return
-        if (error instanceof api.ApiSessionRequired) {
-          auth.signOut()
-          return
-        }
+        if (signal.aborted || !autoSyncReady.value) return
         if (error instanceof api.ApiAutoSyncPaused) await pauseUntil(error.retryAt)
         else await pauseUntil(Date.now() + 5_000)
       }

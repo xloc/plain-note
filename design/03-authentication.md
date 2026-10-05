@@ -8,7 +8,11 @@ Let the user access the same notes from several devices. The app does not store 
 
 Cloudflare Access decides who may use the app. Its policy is configured to allow the intended user.
 
+Access protects only `/api/auth/login` and `/api/auth/session`. The app shell and other API routes are outside Access; the Worker protects those API routes with the app session. Protecting all routes would make synchronization depend on the shorter-lived Access session.
+
 When the app needs a session, the Worker verifies the Access token and creates one. Every identity allowed by Cloudflare Access can access the same notes.
+
+The sign-in button navigates to `/api/auth/login` so Cloudflare can complete authentication in the browser. After returning to the same page, the app checks its session and creates one through `/api/auth/session` only if needed. An expired Access session does not interrupt an existing app session or synchronization.
 
 ## App session
 
@@ -21,6 +25,12 @@ Normal API requests require both secrets. Clearing local data deletes the JavaSc
 The app always loads notes from IndexedDB. A signed-out user can create, edit, and delete local notes. These changes stay pending until the user signs in.
 
 The sync message shows the sign-in state. When signed out, the sync button becomes a sign-in button. Only server synchronization requires an app session.
+
+The app validates the session with the Worker at startup and whenever the installed app becomes visible or reconnects. Until a check succeeds or the Worker explicitly rejects it, the session is unknown and the user can retry the check. A temporary request failure preserves an already validated session so synchronization can keep retrying.
+
+The auth store owns the session lifecycle. All authenticated requests report the Worker's `session_required` response through it, including attachments and session management. Shared HTTP handling knows nothing about auth state or encryption; the note API handles encryption and note-specific failures. Sync and UI consume the resulting session state.
+
+Signing out cancels pending sign-in intent and prevents unfinished checks from restoring the session. If a session creation request is already underway, its late cookies are cleared before another sign-in can start.
 
 ## Session management
 

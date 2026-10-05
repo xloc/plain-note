@@ -29,28 +29,16 @@ watch(
       encryptionKeyCopied.value = false
       await nextTick()
       dialog.value?.showModal()
-      void refresh()
+      if (auth.state === 'ready') {
+        await auth.initialize()
+        message.value = ''
+      }
     } else if (dialog.value?.open) {
       dialog.value.close()
     }
   },
   { immediate: true },
 )
-
-async function refresh() {
-  if (auth.state !== 'ready') return
-  try {
-    await auth.refresh()
-    message.value = ''
-  } catch (error) {
-    message.value = errorMessage(error)
-  }
-}
-
-async function signIn() {
-  await auth.createSession()
-  message.value = auth.state === 'ready' ? '' : auth.message
-}
 
 async function revokeSession(id: string) {
   if (!window.confirm('Sign out this session?')) return
@@ -205,12 +193,12 @@ function errorMessage(error: unknown) {
           </div>
         </div>
         <button
-          v-if="auth.state === 'signedOut' || auth.state === 'error'"
+          v-if="auth.state !== 'ready' && !auth.checking"
           class="mt-3 cursor-pointer rounded-lg px-3 py-2 hover:bg-stone-100"
           type="button"
-          @click="signIn"
+          @click="auth.state === 'signedOut' ? auth.signIn() : auth.initialize()"
         >
-          Sign in to view sessions
+          {{ auth.state === 'signedOut' ? 'Sign in to view sessions' : 'Retry connection' }}
         </button>
         <button
           v-else-if="cloud.online.value && auth.state === 'ready'"
@@ -221,7 +209,7 @@ function errorMessage(error: unknown) {
         >
           Sync now
         </button>
-        <p v-if="message" class="mt-3 text-red-600">{{ message }}</p>
+        <p v-if="message || auth.message" class="mt-3 text-red-600">{{ message || auth.message }}</p>
 
         <h3 class="mt-5 font-medium">Encryption key</h3>
         <p v-if="vault.state === 'ready'" class="mt-1 text-sm text-stone-500">

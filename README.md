@@ -42,7 +42,8 @@ End-to-end test and demo instructions are in [e2e/README.md](e2e/README.md).
 4. Configure Cloudflare Access (Auth):
    1. Enable zero trust
    2. Allow policy: intended email addresses or identity groups
-   3. Add worker environment variables:
+   3. Protect only `/api/auth/login` and `/api/auth/session` on the app hostname. Leave the app shell and other API routes outside Access; the Worker requires an app session for those APIs.
+   4. Add worker environment variables:
       - `TEAM_DOMAIN`: like `https://throbbing-firefly-e880.cloudflareaccess.com`
       - `POLICY_AUD`: like `64bc46c...` len=64
 

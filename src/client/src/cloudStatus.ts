@@ -13,14 +13,14 @@ export function useCloudStatus() {
   const vault = useVaultStore()
 
   const status = computed(() => {
-    if (!cloudSync.online || auth.state === 'offline')
+    if (!cloudSync.online)
       return { kind: 'off' as const, title: 'Offline', detail: 'Local changes will sync when this device is online.' }
 
-    if (auth.state === 'loading')
+    if (auth.state !== 'ready' && auth.checking)
       return { kind: 'working' as const, title: 'Connecting', detail: 'Checking access to cloud synchronization.' }
     if (auth.state === 'signedOut')
       return { kind: 'off' as const, title: 'Offline', detail: 'Sign in to synchronize local changes with the cloud.' }
-    if (auth.state === 'error')
+    if (auth.state === 'unknown')
       return { kind: 'error' as const, title: 'Cloud unavailable', detail: auth.message || 'Authentication failed.' }
     if (vault.state === 'loading')
       return { kind: 'working' as const, title: 'Connecting', detail: 'Loading the encryption key.' }

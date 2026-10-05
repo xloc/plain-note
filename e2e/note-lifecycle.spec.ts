@@ -139,6 +139,51 @@ test('pushes a note change to another active device', async ({ browser, page }) 
   }
 })
 
+test('visits the protected login route before creating an app session', async ({ page }) => {
+  const requests: string[] = []
+  await page.route('**/api/auth/**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/api/auth/login') {
+      expect(request.isNavigationRequest()).toBe(true)
+      requests.push(path)
+    } else if (path === '/api/auth/session') {
+      expect(requests).toEqual(['/api/auth/login'])
+      expect(request.method()).toBe('POST')
+      requests.push(path)
+    }
+    await route.continue()
+  })
+
+  await connectCloud(page)
+
+  expect(requests).toEqual(['/api/auth/login', '/api/auth/session'])
+})
+
+test('keeps syncing when Access expires on the sign-in routes', async ({ page, context }) => {
+  await connectCloud(page)
+  const originalSession = (await context.cookies()).find((cookie) => cookie.name === 'PlainNoteSession')!.value
+  const signInRequests: string[] = []
+  await page.route('**/api/auth/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/api/auth/login' || path === '/api/auth/session') {
+      signInRequests.push(path)
+      await route.fulfill({ status: 401, contentType: 'text/plain', body: 'Unauthorized' })
+    } else {
+      await route.continue()
+    }
+  })
+
+  await page.reload()
+  await expect(page.locator('article header').getByTitle('Synced', { exact: true })).toBeVisible()
+  await focusDocument(page.locator('.editor-scroll'))
+  await typeText(page.locator('.ProseMirror'), 'Sync still works after Access expires')
+  await expect(page.locator('article header').getByTitle('Synced', { exact: true })).toBeVisible()
+
+  expect((await context.cookies()).find((cookie) => cookie.name === 'PlainNoteSession')!.value).toBe(originalSession)
+  expect(signInRequests).toEqual([])
+})
+
 test('warns before rebuilding without a local attachment and signs out other sessions', async ({ browser, page }) => {
   await page.goto('/')
   await page.locator('article header').getByTitle('Offline').click()

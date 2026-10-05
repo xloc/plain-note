@@ -1,7 +1,32 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
-import { createAppSession, requireAppSession, requireSameOrigin, revokeOtherSessions, sessionApi } from './auth.ts'
+import {
+  accessLogin,
+  createAppSession,
+  requireAppSession,
+  requireSameOrigin,
+  revokeOtherSessions,
+  sessionApi,
+} from './auth.ts'
+
+test('keeps every Access login return location on the app origin', () => {
+  const origin = 'https://notes.example.com'
+  for (const [redirect, expected] of [
+    ['/notes/one?sessions=1#section', `${origin}/notes/one?sessions=1#section`],
+    ['https://evil.example', `${origin}/`],
+    ['//evil.example/path', `${origin}/`],
+    [`${origin}//evil.example/path`, `${origin}//evil.example/path`],
+    ['https://[invalid', `${origin}/`],
+  ]) {
+    const url = new URL('/api/auth/login', origin)
+    url.searchParams.set('redirect', redirect)
+    const response = accessLogin(new Request(url))
+    assert.equal(response.status, 302)
+    assert.equal(response.headers.get('Location'), expected)
+    assert.equal(new URL(response.headers.get('Location'), origin).origin, origin)
+  }
+})
 
 test('creates and requires a real app session locally', async () => {
   const DB = new MemoryDatabase()

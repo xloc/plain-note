@@ -1,95 +1,147 @@
 import DeviceDetector from '@varienos/device-detector-js'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { CLIENT_SESSION_COOKIE, CLIENT_SESSION_HEADER, type AuthStatus } from '../../../shared/auth'
+import { HttpError, request } from '../http'
 
-type State = 'loading' | 'ready' | 'signedOut' | 'offline' | 'error'
+const SIGN_IN_INTENT = 'plain-note:sign-in'
 
 export const useAuthStore = defineStore('auth', () => {
-  const state = ref<State>('loading')
+  // Undefined means the session has not been established; null means it was rejected or signed out.
+  const status = ref<AuthStatus | null>()
+  const state = computed(() => (status.value === undefined ? 'unknown' : status.value === null ? 'signedOut' : 'ready'))
+  const checking = ref(false)
   const message = ref('')
-  const status = ref<AuthStatus | null>(null)
+  let initializing: Promise<unknown> | null = null
+  let signingOut: Promise<unknown> | null = null
+  let version = 0
 
-  async function initialize() {
-    state.value = 'loading'
+  function initialize() {
+    if (initializing) return initializing
+    checking.value = true
+    initializing = authenticate(version).finally(() => {
+      initializing = null
+      checking.value = false
+    })
+    return initializing
+  }
+
+  async function authenticate(checkVersion: number, createSession = false) {
     try {
-      if (!getClientSessionCookie()) {
-        signOut()
-        return
+      if (signingOut) await signingOut
+      if (checkVersion !== version) return
+      if (createSession) {
+        const name = await browserName()
+        if (checkVersion !== version) return
+        try {
+          await request('/api/auth/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name }),
+          })
+        } finally {
+          // A stale response can still set cookies. Remove the readable secret after it settles.
+          if (checkVersion !== version) clearClientSessionCookie()
+        }
+        if (checkVersion !== version) return
       }
-      const response = await fetch('/api/auth/status')
-      if (response.status === 401) {
-        signOut()
-        return
-      }
-      status.value = await responseValue<AuthStatus>(response)
-      state.value = 'ready'
+      const nextStatus = await request<AuthStatus>('/api/auth/status')
+      if (checkVersion !== version) return
+      status.value = nextStatus
+      message.value = ''
+      sessionStorage.removeItem(SIGN_IN_INTENT)
     } catch (error) {
-      if (error instanceof TypeError) {
-        state.value = 'offline'
-        message.value = 'Offline'
+      if (checkVersion !== version) return
+      if (sessionRequired(error)) {
+        status.value = null
+        if (!createSession && sessionStorage.getItem(SIGN_IN_INTENT)) {
+          sessionStorage.removeItem(SIGN_IN_INTENT)
+          await authenticate(checkVersion, true)
+        } else signOut()
       } else {
-        fail(error)
+        message.value = error instanceof Error ? error.message : 'Authentication failed'
       }
     }
   }
 
-  async function createSession() {
-    state.value = 'loading'
-    try {
-      const response = await fetch('/api/auth/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: await browserName() }),
-      })
-      await responseValue(response)
-      await refresh()
-      state.value = 'ready'
-    } catch (error) {
-      fail(error)
-    }
-  }
-
-  async function refresh() {
-    status.value = await responseValue<AuthStatus>(await fetch('/api/auth/status'))
+  async function signIn() {
+    const signInVersion = ++version
+    // Finish old cookie-changing requests before navigating into a new sign-in.
+    await initializing
+    await signingOut
+    if (signInVersion !== version) return
+    sessionStorage.setItem(SIGN_IN_INTENT, '1')
+    const url = new URL('/api/auth/login', location.origin)
+    url.searchParams.set('redirect', location.pathname + location.search + location.hash)
+    location.assign(url)
   }
 
   async function revokeSession(id: string) {
-    await remove(`/api/auth/sessions/${id}`)
+    await withSession(() => remove(`/api/auth/sessions/${id}`))
     if (id === status.value?.currentSessionId) signOut()
-    else await refresh()
+    else await initialize()
   }
 
   async function revokeAll() {
-    await remove('/api/auth/sessions')
+    await withSession(() => remove('/api/auth/sessions'))
     signOut()
   }
 
   function signOutBestEffort() {
     const currentSessionId = status.value?.currentSessionId
-    if (currentSessionId) void remove(`/api/auth/sessions/${currentSessionId}`).catch(() => undefined)
+    if (currentSessionId) {
+      signingOut = remove(`/api/auth/sessions/${currentSessionId}`)
+        .catch(() => undefined)
+        .finally(() => (signingOut = null))
+    }
     signOut()
   }
 
   function signOut() {
+    version++
+    sessionStorage.removeItem(SIGN_IN_INTENT)
     clearClientSessionCookie()
     status.value = null
-    state.value = 'signedOut'
-    message.value = 'Sign in to synchronize notes'
+    checking.value = false
+    message.value = ''
   }
 
-  function fail(error: unknown) {
-    message.value = error instanceof Error ? error.message : 'Authentication failed'
-    state.value = 'error'
+  async function withSession<T>(operation: () => Promise<T>) {
+    if (!status.value) {
+      await initialize()
+      if (!status.value) throw new Error(message.value || 'Sign in to synchronize notes')
+    }
+    const requestVersion = version
+    try {
+      return await operation()
+    } catch (error) {
+      if (requestVersion === version && sessionRequired(error)) signOut()
+      throw error
+    }
   }
 
-  return { state, message, status, initialize, createSession, refresh, revokeSession, revokeAll, signOutBestEffort, signOut }
+  return {
+    state,
+    checking,
+    message,
+    status,
+    initialize,
+    signIn,
+    revokeSession,
+    revokeAll,
+    signOutBestEffort,
+    withSession,
+  }
 })
+
+function sessionRequired(error: unknown) {
+  return error instanceof HttpError && error.status === 401 && error.body?.error === 'session_required'
+}
 
 async function remove(path: string) {
   const clientKey = getClientSessionCookie()
   const headers = clientKey ? { [CLIENT_SESSION_HEADER]: clientKey } : undefined
-  await responseValue(await fetch(path, { method: 'DELETE', headers }))
+  await request(path, { method: 'DELETE', headers })
 }
 
 function getClientSessionCookie() {
@@ -103,17 +155,6 @@ function getClientSessionCookie() {
 function clearClientSessionCookie() {
   const secure = location.protocol === 'https:' ? '; Secure' : ''
   document.cookie = `${CLIENT_SESSION_COOKIE}=; SameSite=Strict; Path=/; Max-Age=0${secure}`
-}
-
-async function responseValue<T extends object = { ok: true }>(response: Response): Promise<T> {
-  let value: T | { error: string }
-  try {
-    value = (await response.json()) as T | { error: string }
-  } catch {
-    throw new Error(`Request failed with ${response.status}`)
-  }
-  if (!response.ok) throw new Error('error' in value ? value.error : `Request failed with ${response.status}`)
-  return value as T
 }
 
 async function browserName() {

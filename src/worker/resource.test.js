@@ -7,6 +7,9 @@ const syncGate = {
   getByName: () => ({ fetch: async () => Response.json({ generation: 'gate', version: 0 }) }),
 }
 
+const background = vi.hoisted(() => ({ waitUntil: vi.fn() }))
+vi.mock('cloudflare:workers', () => background)
+
 class Bucket {
   objects = new Map()
   etag = 0
@@ -111,6 +114,44 @@ class DB {
     }
   }
 }
+
+test('acknowledges a saved note before a slow device notification completes', async () => {
+  const bucket = new Bucket()
+  let finishNotification
+  const notification = new Promise((resolve) => (finishNotification = resolve))
+  const notify = vi.fn(() => notification)
+  const env = {
+    DB: new DB(),
+    NOTES: bucket,
+    TEST_AUTH_BYPASS: true,
+    SYNC_GATE: { getByName: () => ({ fetch: notify }) },
+  }
+  const note = { id: 'note-id', updatedAt: 1, revision: 'revision-1', resourceIds: [], encrypted: 'ciphertext' }
+  background.waitUntil.mockClear()
+  let response
+  const saving = worker
+    .fetch(
+      new Request('http://localhost:8787/api/notes/note-id', {
+        method: 'PUT',
+        headers: vaultHeaders,
+        body: JSON.stringify({ baseRevision: null, note }),
+      }),
+      env,
+    )
+    .then((value) => {
+      response = value
+    })
+  try {
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(response?.status).toBe(200))
+    expect(await response.json()).toEqual({ note })
+    expect(background.waitUntil).toHaveBeenCalledOnce()
+  } finally {
+    finishNotification(Response.json({ generation: 'gate', version: 1 }))
+    await saving
+    await Promise.all(background.waitUntil.mock.calls.map(([task]) => task))
+  }
+})
 
 test('uploads, repairs, and downloads opaque resource ciphertext by UUID', async () => {
   const bucket = new Bucket()

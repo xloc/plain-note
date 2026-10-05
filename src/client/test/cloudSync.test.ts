@@ -8,7 +8,7 @@ const fakes = vi.hoisted(() => {
   return {
     events,
     online: undefined as { value: boolean } | undefined,
-    auth: { state: 'ready', signOut: vi.fn(), signOutBestEffort: vi.fn() },
+    auth: { state: 'ready', signOutBestEffort: vi.fn() },
     notes: {
       syncing: false,
       hasPending: false,
@@ -46,7 +46,6 @@ vi.mock('@vueuse/core', async () => {
 })
 vi.mock('../src/api', () => ({
   ApiAutoSyncPaused: class extends Error {},
-  ApiSessionRequired: class extends Error {},
   rebuildVault: fakes.rebuildVault,
   waitForChanges: fakes.waitForChanges,
 }))
@@ -88,6 +87,31 @@ test('rebuilds the cloud from local data without a server sync', async () => {
 
   expect(fakes.events).toEqual(['prepare', 'rebuild', 'upload'])
   expect(fakes.rebuildVault).toHaveBeenCalledWith()
+})
+
+test('allows another sync after a temporary request failure', async () => {
+  fakes.notes.sync.mockClear()
+  fakes.notes.sync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  setActivePinia(createPinia())
+
+  cloudSync = useCloudSyncStore()
+  await cloudSync.sync()
+
+  await cloudSync.sync()
+  expect(fakes.notes.sync).toHaveBeenCalledTimes(2)
+})
+
+test('retries the change listener after a temporary failure without an online event', async () => {
+  vi.useFakeTimers()
+  fakes.waitForChanges.mockClear()
+  fakes.waitForChanges.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  setActivePinia(createPinia())
+  cloudSync = useCloudSyncStore()
+
+  await vi.advanceTimersByTimeAsync(5_000)
+
+  expect(fakes.waitForChanges).toHaveBeenCalledTimes(2)
+  expect((fakes.waitForChanges.mock.calls[1]?.[3] as AbortSignal).aborted).toBe(false)
 })
 
 test('does not clear the cloud when the user cancels for a missing attachment', async () => {

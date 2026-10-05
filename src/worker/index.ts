@@ -1,3 +1,4 @@
+import { waitUntil } from 'cloudflare:workers'
 import type {
   DeleteNoteRequest,
   EncryptedNote,
@@ -10,6 +11,7 @@ import type {
   Tombstone,
 } from '../shared/note'
 import {
+  accessLogin,
   createAppSession,
   type AuthEnv,
   requireAppSession,
@@ -52,6 +54,9 @@ export default {
     if (originError) return originError
 
     try {
+      if (request.method === 'GET' && url.pathname === '/api/auth/login') {
+        return accessLogin(request)
+      }
       if (request.method === 'POST' && url.pathname === '/api/auth/session') {
         return await createAppSession(request, env)
       }
@@ -132,7 +137,7 @@ async function rebuildVault(request: Request, env: Env, sessionId: string) {
   if (vaultError) {
     // A lost success response must be retryable after the server has already installed the new key.
     if (await matchesVaultKey(env.NOTES, body.keyId)) {
-      await notifySyncGate(request, env)
+      waitUntil(notifySyncGate(request, env))
       return json({ ok: true })
     }
     return vaultError
@@ -145,13 +150,13 @@ async function rebuildVault(request: Request, env: Env, sessionId: string) {
   await rebuildIndex(env)
   await clearCleanupFailure(env.DB)
   await replaceVaultKey(env.NOTES, body.keyId)
-  await notifySyncGate(request, env)
+  waitUntil(notifySyncGate(request, env))
   return json({ ok: true })
 }
 
 async function notifyAfter(result: Promise<Response>, request: Request, env: Env) {
   const response = await result
-  if (response.ok) await notifySyncGate(request, env)
+  if (response.ok) waitUntil(notifySyncGate(request, env))
   return response
 }
 
