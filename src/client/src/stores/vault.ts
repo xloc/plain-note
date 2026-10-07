@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
-import { recoveryKey, type VaultKey } from '../encryption'
+import { recoveryKey, type VaultKey } from '@plain-note/shared/encryption'
 
 const STORAGE_KEY = 'plain-note:vault-key'
 const PENDING_STORAGE_KEY = 'plain-note:pending-vault-key'

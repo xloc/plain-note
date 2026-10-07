@@ -1,4 +1,4 @@
-import { markdownParser } from '../editor/markdown.ts'
+import { tokenizer } from './markdownTokenizer.ts'
 
 type Edit = {
   from: number
@@ -18,7 +18,7 @@ export function mergeMarkdown(base: string, server: string, device: string) {
 
 export function markdownBlocks(content: string) {
   const lines = content.split('\n')
-  return markdownParser.tokenizer
+  return tokenizer
     .parse(content, {})
     .flatMap((token) =>
       token.level === 0 && token.map ? [lines.slice(token.map[0], token.map[1]).join('\n').replace(/\n+$/, '')] : [],

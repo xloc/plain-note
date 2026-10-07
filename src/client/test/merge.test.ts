@@ -1,5 +1,5 @@
 import { expect, test } from 'vite-plus/test'
-import { markdownBlocks, mergeMarkdown } from '../src/stores/mergeMarkdown.ts'
+import { markdownBlocks, mergeMarkdown } from '@plain-note/shared/mergeMarkdown'
 
 test('finds top-level Markdown blocks', () => {
   const fence = String.fromCharCode(96).repeat(3)

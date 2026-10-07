@@ -1,6 +1,6 @@
 import { expect, test } from 'vite-plus/test'
 import type { Note } from '../../shared/note.ts'
-import * as encryption from '../src/encryption.ts'
+import * as encryption from '@plain-note/shared/encryption'
 
 test('creates a portable random vault key', async () => {
   const secret = encryption.recoveryKey.create()

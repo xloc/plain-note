@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.21.0",
   "scripts": {
-    "build": "vp run -F @plain-note/client build",
+    "build": "vp run -F @plain-note/client -F @plain-note/cli build",
     "check": "vp check --no-fmt",
     "dev": "vp run -F @plain-note/client -F @plain-note/worker --parallel dev",
     "dev:client": "vp run -F @plain-note/client dev",
@@ -13,8 +13,10 @@
     "format": "vp fmt",
     "format:check": "vp fmt --check",
     "smoke": "bash scripts/smoke-api.sh",
-    "test": "vp run -F @plain-note/client test",
-    "typecheck": "vp run -F @plain-note/worker typecheck"
+    "test": "vp run -F @plain-note/client -F @plain-note/cli test",
+    "typecheck": "vp run -F @plain-note/worker -F @plain-note/cli typecheck",
+    "build:cli": "vp run -F @plain-note/cli build",
+    "test:cli:integration": "node scripts/test-cli.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

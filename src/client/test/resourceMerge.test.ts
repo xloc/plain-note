@@ -1,6 +1,6 @@
 import { expect, test } from 'vite-plus/test'
 import type { NoteResource } from '../../shared/note.ts'
-import { mergeResources } from '../src/stores/mergeResources.ts'
+import { mergeResources } from '@plain-note/shared/mergeResources'
 
 const first: NoteResource = { id: 'first', name: 'first.txt', mime: 'text/plain', size: 1, createdAt: 1 }
 const remoteAddition: NoteResource = {

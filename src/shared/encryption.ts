@@ -1,7 +1,7 @@
 import { gcm } from '@noble/ciphers/aes.js'
 import { sha256 } from '@noble/hashes/sha2.js'
-import { base58, base64 } from '../../shared/base'
-import type { EncryptedNote, Note, NoteRecord, RemoteNoteRecord } from '../../shared/note'
+import { base58, base64 } from './base.ts'
+import type { EncryptedNote, Note, NoteRecord, RemoteNoteRecord } from './note.ts'
 
 const VERSION = 1
 const NONCE_BYTES = 12

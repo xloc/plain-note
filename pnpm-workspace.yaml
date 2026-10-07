@@ -1,6 +1,8 @@
 packages:
   - src/client
   - src/worker
+  - src/cli
+  - src/shared
 
 allowBuilds:
   esbuild: true

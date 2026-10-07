@@ -1,4 +1,4 @@
-import type { NoteResource } from '../../../shared/note'
+import type { NoteResource } from './note.ts'
 
 export function mergeResources(base: NoteResource[], remote: NoteResource[], local: NoteResource[]) {
   const baseById = new Map(base.map((resource) => [resource.id, resource]))

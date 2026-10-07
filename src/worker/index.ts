@@ -20,6 +20,7 @@ import {
   sessionApi,
 } from './auth'
 import { getChanges, rebuildIndex, recordChange } from './index-db'
+import { approveCli, exchangeCli } from './cli-auth'
 import { clearCleanupFailure, recordCleanupFailure } from './issues'
 import { json } from './response'
 import { notifySyncGate, SyncGate, type SyncGateEnv, waitForSyncGate } from './sync-gate'
@@ -60,8 +61,14 @@ export default {
       if (request.method === 'POST' && url.pathname === '/api/auth/session') {
         return await createAppSession(request, env)
       }
+      if (request.method === 'POST' && url.pathname === '/api/auth/cli/exchange') {
+        return await exchangeCli(request, env.DB)
+      }
       const session = await requireAppSession(request, env)
       if (session instanceof Response) return session
+      if (request.method === 'POST' && url.pathname === '/api/auth/cli/approve') {
+        return await approveCli(request, env.DB, session.id)
+      }
       if (url.pathname.startsWith('/api/auth/')) return await sessionApi(request, env, url, session)
       return await api(request, env, url, session.id)
     } catch (error) {

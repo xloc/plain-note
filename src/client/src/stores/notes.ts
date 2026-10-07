@@ -7,9 +7,9 @@ import * as api from '../api'
 import * as db from '../db'
 import { claimEditLock } from '../editLock'
 import { referencedResourceIds } from '../editor/markdown'
-import { mergeResources } from './mergeResources'
-import { mergeTags } from './mergeTags'
-import { mergeMarkdown } from './mergeMarkdown'
+import { mergeResources } from '@plain-note/shared/mergeResources'
+import { mergeTags } from '@plain-note/shared/mergeTags'
+import { mergeMarkdown } from '@plain-note/shared/mergeMarkdown'
 import { copyNote, copyRecord, fromRemote, toNote } from './noteRecords'
 
 type NewNote = Pick<Note, 'content' | 'tags' | 'resources' | 'createdAt' | 'updatedAt'>

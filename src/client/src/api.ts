@@ -13,7 +13,7 @@ import type {
   SyncWaitResponse,
   Tombstone,
 } from '../../shared/note'
-import * as encryption from './encryption'
+import * as encryption from '@plain-note/shared/encryption'
 import * as http from './http'
 import { useAuthStore } from './stores/auth'
 import { currentVault } from './stores/vault'

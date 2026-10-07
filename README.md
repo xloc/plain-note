@@ -32,6 +32,59 @@ The smoke test expects the local Worker to be running.
 
 End-to-end test and demo instructions are in [e2e/README.md](e2e/README.md).
 
+## Command-line client
+
+The Node.js CLI supports `auth`, `new`, and `sync`. All three commands operate in the current directory.
+
+Build it with `pnpm build:cli`, then run `node /absolute/path/to/note-pwa/src/cli/dist/main.cjs` from your notes
+directory. For convenience, define `alias plain-note='node /absolute/path/to/note-pwa/src/cli/dist/main.cjs'`.
+The built file is standalone and can also be installed on your PATH as `plain-note`.
+
+```sh
+plain-note auth --server https://your-notes.example.com
+plain-note new
+plain-note sync
+```
+
+`auth` opens a browser approval page and then asks for the existing vault recovery key. For SSH or unattended
+terminal input, use `--no-browser --key-file /path/to/recovery-key.txt` and open the printed URL on another device.
+The browser must be signed in. CLI sessions have the same 30-day expiry and revocation controls as browser sessions.
+The Worker and browser changes in this repository must be deployed before CLI authorization is available.
+
+`new` works offline, creates a UUID-named note folder, and prints the path to its empty `note.md`.
+Edit that file with any text editor. Delete the whole note folder to delete the note on the next sync.
+Keep folder names unchanged; use `new` to create notes rather than copying or renaming folders.
+
+`sync` performs one two-way synchronization pass. Markdown is transferred without adding front matter,
+rewriting `resource:` links, or reformatting. Concurrent edits use the browser's three-way merge rules;
+overlapping blocks retain both versions between horizontal dividers. An edit wins over a concurrent deletion.
+
+```text
+notes-directory/
+  .plain-note/
+    config.yaml
+    state.json
+  <note-uuid>/
+    note.md
+    resources/
+      <resource-uuid>
+```
+
+Attachments are decrypted downloads with read-only permissions. Manage attachments through the browser;
+the CLI never uploads local attachment changes. When restoring a deleted note, it can restore missing cloud
+attachments only after checking their bytes against the saved download hashes. Only tracked note folders are synchronized.
+
+`.plain-note/config.yaml` stores the server, session credentials, and recovery key with owner-only permissions.
+`.plain-note/state.json` stores note metadata and merge bases. The metadata directory excludes itself from Git.
+Keep it with this folder: removing synchronization state loses the history needed to recognize local deletions
+and merge edits. If a command is forcibly interrupted and leaves `.plain-note/lock`, remove the lock after confirming
+that the command has stopped, then retry.
+
+CLI tests run with `pnpm --filter @plain-note/cli test`. Worker authorization tests run with
+`node --test src/worker/auth.test.js src/worker/cli-auth.test.js` on Node.js 24.
+After `pnpm build`, `node scripts/test-cli.mjs` on Node.js 24 checks authorization and two-way sync against an isolated local
+Worker using temporary storage. It exercises the approval API without controlling a browser.
+
 ## Cloudflare deployment
 
 ### First production deployment

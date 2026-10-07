@@ -1,5 +1,11 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
-import { CLIENT_SESSION_COOKIE, CLIENT_SESSION_HEADER, SESSION_COOKIE, type AuthStatus } from '../shared/auth.ts'
+import {
+  CLIENT_SESSION_COOKIE,
+  CLIENT_SESSION_HEADER,
+  SESSION_COOKIE,
+  type AuthStatus,
+  type CliCredentials,
+} from '../shared/auth.ts'
 import { base64 } from '../shared/base.ts'
 import { isLocalRequest } from './environment.ts'
 import { error, json } from './response.ts'
@@ -27,22 +33,27 @@ type Env = AuthEnv & { DB: D1Database }
 export async function createAppSession(request: Request, env: Env) {
   const identity = await authenticateAccess(request, env)
   if (identity instanceof Response) return identity
-  await ensureSchema(env.DB)
-
   const body = await request.json<{ name?: string }>()
   const name = body.name?.trim()
   if (!name || name.length > 100) return error('invalid_session', 400)
 
+  const credentials = await issueSession(env.DB, name)
+  return setSessionCookies(json({ ok: true }), request, credentials.token, credentials.clientKey, SESSION_MS / 1000)
+}
+
+export async function issueSession(db: D1Database, name: string): Promise<CliCredentials> {
+  await ensureSchema(db)
   const id = crypto.randomUUID()
   const token = randomToken()
   const clientKey = randomToken()
   const now = Date.now()
-  await env.DB.prepare(`INSERT INTO auth_sessions (id, token_hash, client_key_hash, name, created_at, expires_at)
+  await db
+    .prepare(`INSERT INTO auth_sessions (id, token_hash, client_key_hash, name, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(id, await hash(token), await hash(clientKey), name, now, now + SESSION_MS)
     .run()
 
-  return setSessionCookies(json({ ok: true }), request, token, clientKey, SESSION_MS / 1000)
+  return { token, clientKey, expiresAt: now + SESSION_MS }
 }
 
 export function accessLogin(request: Request) {
@@ -162,7 +173,7 @@ async function sessionStatus(db: D1Database, session: AppSessionIdentity): Promi
   }
 }
 
-async function ensureSchema(db: D1Database) {
+export async function ensureSchema(db: D1Database) {
   if (initializedDatabases.has(db)) return
   await db
     .prepare(`CREATE TABLE IF NOT EXISTS auth_sessions (

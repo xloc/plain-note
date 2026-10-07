@@ -4,7 +4,7 @@ import * as api from '../src/api'
 import { useAuthStore } from '../src/stores/auth'
 
 vi.mock('../src/stores/vault', () => ({ currentVault: () => ({ id: 'vault', key: 'key' }) }))
-vi.mock('../src/encryption', () => ({
+vi.mock('@plain-note/shared/encryption', () => ({
   resource: { encrypt: async (blob: Blob) => blob, decrypt: async (blob: Blob) => blob },
   record: { decrypt: async () => ({ id: 'note', deleted: true, revision: 'remote', updatedAt: 2 }) },
 }))

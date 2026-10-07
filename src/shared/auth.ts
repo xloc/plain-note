@@ -14,3 +14,6 @@ export type AuthStatus = {
   currentSessionId: string
   sessions: AppSession[]
 }
+
+export type CliAuthorization = { id: string; challenge: string; name: string }
+export type CliCredentials = { token: string; clientKey: string; expiresAt: number }

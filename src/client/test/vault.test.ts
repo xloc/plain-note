@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, expect, test, vi } from 'vite-plus/test'
-import { recoveryKey } from '../src/encryption'
+import { recoveryKey } from '@plain-note/shared/encryption'
 import { currentVault, useVaultStore } from '../src/stores/vault'
 
 afterEach(() => vi.unstubAllGlobals())
