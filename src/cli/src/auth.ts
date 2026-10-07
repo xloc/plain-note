@@ -41,7 +41,7 @@ export async function authenticate(
   // A read verifies the key fingerprint without creating or replacing the cloud vault.
   await (await createApi(config)).changes(null, 0)
   await workspace.saveConfig(config)
-  console.error('Authenticated. Run plain-note sync to synchronize this folder.')
+  console.error('Authenticated. Run note sync to synchronize this folder.')
 }
 
 export async function waitForAuthorization(server: string, id: string, verifier: string, timeoutMs = 5 * 60_000) {
@@ -58,7 +58,7 @@ export async function waitForAuthorization(server: string, id: string, verifier:
     if (response.status !== 202) throw new Error(`CLI authorization failed (${response.status}).`)
     await delay(2_000)
   }
-  throw new Error('Authorization timed out. Run plain-note auth again.')
+  throw new Error('Authorization timed out. Run note auth again.')
 }
 
 export function serverOrigin(value: string) {

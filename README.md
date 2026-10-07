@@ -34,16 +34,22 @@ End-to-end test and demo instructions are in [e2e/README.md](e2e/README.md).
 
 ## Command-line client
 
-The Node.js CLI supports `auth`, `new`, and `sync`. All three commands operate in the current directory.
-
-Build it with `pnpm build:cli`, then run `node /absolute/path/to/note-pwa/src/cli/dist/main.cjs` from your notes
-directory. For convenience, define `alias plain-note='node /absolute/path/to/note-pwa/src/cli/dist/main.cjs'`.
-The built file is standalone and can also be installed on your PATH as `plain-note`.
+The `note` CLI requires Node.js 22 or newer and supports `auth`, `new`, and `sync`.
+Install it from the repository root:
 
 ```sh
-plain-note auth --server https://your-notes.example.com
-plain-note new
-plain-note sync
+pnpm install:cli
+```
+
+This builds the CLI and installs the `note` command globally. If pnpm reports that its global bin directory is
+missing, run `pnpm setup`, restart your terminal, and retry. Run `pnpm install:cli` again after updating the CLI.
+
+All three commands operate in the current directory. From your notes directory:
+
+```sh
+note auth --server https://your-notes.example.com
+note new
+note sync
 ```
 
 `auth` opens a browser approval page and then asks for the existing vault recovery key. For SSH or unattended

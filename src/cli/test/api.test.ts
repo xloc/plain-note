@@ -72,5 +72,5 @@ test('an expired CLI session asks for authentication again', async () => {
     token: 'token',
     clientKey: 'client',
   })
-  await expect(api.changes(null, 0)).rejects.toThrow('Run plain-note auth')
+  await expect(api.changes(null, 0)).rejects.toThrow('Run note auth')
 })

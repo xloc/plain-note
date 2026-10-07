@@ -4,13 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "bin": {
-    "plain-note": "dist/main.cjs"
+    "note": "dist/main.cjs"
   },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/main.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs",
+    "build": "tsc --noEmit && node build.mjs",
     "test": "vp test run",
     "typecheck": "tsc --noEmit"
   },

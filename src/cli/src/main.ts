@@ -6,7 +6,7 @@ import { newNote } from './new.ts'
 import { sync } from './sync.ts'
 import { withWorkspace } from './workspace.ts'
 
-const help = `Usage: plain-note <auth|new|sync>
+const help = `Usage: note <auth|new|sync>
 
 All commands operate in the current directory.
 
@@ -46,7 +46,7 @@ async function main() {
       })
     } else {
       const config = await workspace.config()
-      if (!config) throw new Error('Run plain-note auth in this directory first.')
+      if (!config) throw new Error('Run note auth in this directory first.')
       const result = await sync(workspace, await createApi(config))
       console.log(`Synced: ${result.uploaded} uploaded, ${result.downloaded} downloaded, ${result.deleted} deleted.`)
     }

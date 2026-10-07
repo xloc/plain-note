@@ -19,9 +19,9 @@ export class ApiError extends Error {
   ) {
     super(
       code === 'session_required'
-        ? 'Session expired or revoked. Run plain-note auth.'
+        ? 'Session expired or revoked. Run note auth.'
         : code === 'vault_key_mismatch'
-          ? 'The vault key changed. Run plain-note auth with the current recovery key.'
+          ? 'The vault key changed. Run note auth with the current recovery key.'
           : code,
     )
   }

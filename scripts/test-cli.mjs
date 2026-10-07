@@ -133,7 +133,7 @@ try {
   assert.equal(revoked.status, 200)
   const rejected = await command(first, ['sync']).finished
   assert.equal(rejected.code, 1)
-  assert.match(rejected.stderr, /plain-note auth/)
+  assert.match(rejected.stderr, /note auth/)
   console.log(
     'CLI integration passed: authorization, encrypted two-way sync, conflicts, attachments, deletion, revocation.',
   )

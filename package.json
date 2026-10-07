@@ -16,6 +16,7 @@
     "test": "vp run -F @plain-note/client -F @plain-note/cli test",
     "typecheck": "vp run -F @plain-note/worker -F @plain-note/cli typecheck",
     "build:cli": "vp run -F @plain-note/cli build",
+    "install:cli": "vp run -F @plain-note/cli build && pnpm add --global ./src/cli/dist",
     "test:cli:integration": "node scripts/test-cli.mjs"
   },
   "devDependencies": {
